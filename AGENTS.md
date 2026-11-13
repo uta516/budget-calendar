@@ -7,3 +7,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+# プロジェクトのルール
+- 技術：Next.js（App Router）、TypeScript、Tailwind、Supabase、FullCalendar、Vitest
+- 金額はすべて「円の整数」で扱う
+- データの型は src/types/database.ts を使う（手で書き換えない）
+- 担当外のファイルは変更しない
+  - 画面：src/app の各ページ、src/components
+  - データ：src/lib/supabase、src/app/api/calendar、supabase/
+  - 計算：src/lib/budget.ts、テスト、src/app/api/ai
+- 計算処理は src/lib/budget.ts に書き、必ずテストを付ける
+- APIキーなどの秘密はコードに書かず、環境変数を使う
