@@ -13,7 +13,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - データの型は src/types/database.ts を使う（手で書き換えない）
 - 担当外のファイルは変更しない
   - 画面：src/app の各ページ、src/components
-  - データ・連携：src/lib/supabase、src/app/api/calendar、src/app/login、src/app/auth、src/proxy.ts、supabase/
+  - データ・連携：src/lib/supabase、src/app/api/calendar、src/app/login、src/app/auth、src/app/dev、src/proxy.ts、supabase/、docs/data-functions.md
   - 計算：src/lib/budget.ts、テスト、src/app/api/ai
 - 計算処理は src/lib/budget.ts に書き、必ずテストを付ける
 - APIキーなどの秘密はコードに書かず、環境変数を使う
@@ -42,7 +42,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 金額は円の整数で扱う
 
 ## データの関数（src/lib/supabase/）
-- 読み込み：getIncomes、getFixedCosts、getCategories、getGoal、getExpenses(月)
-- 保存：addIncome、addFixedCost、addCategory、saveGoal、addExpense
-- 削除：deleteExpense
+使い方と呼び出し例は docs/data-functions.md を見る。`import { ... } from "@/lib/supabase"` で、"use client" のコンポーネントから呼ぶ。
+- 収入：getIncomes、addIncome(name, amount)、updateIncome(id, name, amount)、deleteIncome(id)
+- 固定費：getFixedCosts、addFixedCost(name, amount)、updateFixedCost(id, name, amount)、deleteFixedCost(id)
+- カテゴリ：getCategories、addCategory(name, monthlyBudget)、updateCategory(id, name, monthlyBudget)、deleteCategory(id)、ensureDefaultCategories()
+- 支出：getExpenses("2026-11")、addExpense({ amount, categoryId, eventId?, spentOn? })、deleteExpense(id)
+- 目標：getGoal()（無ければ null）、saveGoal({ name, targetAmount, months, savedAmount })（1人1つ）
+- 設定：getSettings()（無ければ初期値）、saveSettings({ hourlyWage, nightRate, holidayBonus })
+- 失敗したときは日本語のメッセージの Error を投げる
 - これらができるまで、画面は src/lib/dummy.ts の仮データを使う
