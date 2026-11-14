@@ -24,3 +24,25 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - PRの本文は .github/pull_request_template.md の形に従って、全項目を埋める
 - PRは1つの機能（ユーザーストーリー1〜3個）ごとに小さく出す
 - 他の1人以上が確認してから main に入れる
+
+## 計算の関数（src/lib/budget.ts）
+中間発表までは、予定のことは考えない単純な版にする。
+
+| 関数 | 意味 | 決まり |
+|---|---|---|
+| freeMoney(収入合計, 固定費合計, 貯金) | 今月自由に使えるお金 | 収入 − 固定費 − 貯金。マイナスなら0 |
+| monthLeft(自由に使えるお金, 今月使った額) | 今月あと使えるお金 | 引き算。マイナスもそのまま返す |
+| weekBudget(自由に使えるお金, 今日の日付) | 今週の予算 | 自由に使えるお金 ÷ その月の日数 × 7。10円単位で切り捨て |
+| weekLeft(今週の予算, 今週使った額) | 今週あと使えるお金 | 引き算。マイナスもそのまま返す |
+| todayGuide(今週あと, 今日の日付) | 今日の目安 | 今週あと ÷ 日曜までの残り日数（今日を含む）。10円単位で切り捨て。マイナスなら0 |
+| categoryLeft(カテゴリの予算, そのカテゴリで使った額) | カテゴリ別の残り | 引き算。マイナスもそのまま返す |
+
+- 週は月曜はじまり
+- 月をまたぐ週は、今日がある月の数字で計算する
+- 金額は円の整数で扱う
+
+## データの関数（src/lib/supabase/）
+- 読み込み：getIncomes、getFixedCosts、getCategories、getGoal、getExpenses(月)
+- 保存：addIncome、addFixedCost、addCategory、saveGoal、addExpense
+- 削除：deleteExpense
+- これらができるまで、画面は src/lib/dummy.ts の仮データを使う
