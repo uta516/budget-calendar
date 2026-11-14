@@ -35,6 +35,18 @@ export async function proxy(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
 
   if (!data?.claims) {
+    // API は fetch から呼ばれるので、ログイン画面へリダイレクトせず 401 の JSON を返す
+    if (request.nextUrl.pathname.startsWith("/api/")) {
+      const unauthorized = NextResponse.json(
+        { error: "ログインしていません。もう一度ログインしてください" },
+        { status: 401 },
+      );
+      response.cookies
+        .getAll()
+        .forEach((cookie) => unauthorized.cookies.set(cookie));
+      return unauthorized;
+    }
+
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";

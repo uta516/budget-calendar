@@ -3,15 +3,18 @@
 import { useState } from "react";
 import {
   addCategory,
+  addEvent,
   addExpense,
   addFixedCost,
   addIncome,
   deleteCategory,
+  deleteEvent,
   deleteExpense,
   deleteFixedCost,
   deleteIncome,
   ensureDefaultCategories,
   getCategories,
+  getEvents,
   getExpenses,
   getFixedCosts,
   getGoal,
@@ -19,12 +22,27 @@ import {
   getSettings,
   saveGoal,
   saveSettings,
+  syncGoogleCalendar,
   updateCategory,
+  updateEvent,
   updateFixedCost,
   updateIncome,
+  type Event,
+  type EventKind,
+  type SyncResult,
 } from "@/lib/supabase";
 
 type Result = { ok: boolean; label: string; detail: string };
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("ja-JP", {
+    month: "numeric",
+    day: "numeric",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 function thisMonth(): string {
   const d = new Date();
@@ -34,6 +52,25 @@ function thisMonth(): string {
 export default function DataCheck() {
   const [results, setResults] = useState<Result[]>([]);
   const [running, setRunning] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [events, setEvents] = useState<Event[]>([]);
+
+  async function syncNow() {
+    setSyncing(true);
+    setSyncError(null);
+    setSyncResult(null);
+    try {
+      const month = thisMonth();
+      setSyncResult(await syncGoogleCalendar(month));
+      setEvents(await getEvents(month));
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   async function runAll() {
     setRunning(true);
@@ -97,6 +134,37 @@ export default function DataCheck() {
     }
     if (category) await step("deleteCategory", () => deleteCategory(category.id), () => "削除しました");
 
+    // 予定（手入力の予定を追加 → 変更 → 今月の一覧 → 削除）
+    const month = thisMonth();
+    const startsAt = `${month}-15T19:00:00+09:00`;
+    const event = await step("addEvent", () =>
+      addEvent({ title: "テスト予定", kind: "drink", startsAt, estimatedAmount: 3000 }),
+    );
+    if (event) {
+      await step("updateEvent", () =>
+        updateEvent(event.id, {
+          title: "テスト予定（変更）",
+          kind: "meal",
+          startsAt,
+          endsAt: `${month}-15T21:00:00+09:00`,
+          estimatedAmount: 2500,
+        }),
+      );
+    }
+    await step(`getEvents("${month}")`, () => getEvents(month), count);
+    if (event) await step("deleteEvent", () => deleteEvent(event.id), () => "削除しました");
+    try {
+      await addEvent({
+        title: "種類のテスト",
+        kind: "party" as EventKind,
+        startsAt,
+        estimatedAmount: 0,
+      });
+      push({ ok: false, label: "予定の種類チェック", detail: "決まっていない種類が保存できてしまいました" });
+    } catch (e) {
+      push({ ok: true, label: "予定の種類チェック", detail: `正しくエラー：${(e as Error).message}` });
+    }
+
     // 入力チェック（エラーになれば成功）
     try {
       await addIncome("小数のテスト", 100.5);
@@ -133,7 +201,7 @@ export default function DataCheck() {
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-6">
       <h1 className="text-xl font-semibold">データ関数の動作確認</h1>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        ボタンを押すと、各関数を順に試します。テスト用に追加した収入・固定費・カテゴリ・支出は最後に削除します。
+        ボタンを押すと、各関数を順に試します。テスト用に追加した収入・固定費・カテゴリ・支出・予定は最後に削除します。
         目標と設定は、読んだ値をそのまま保存し直すだけです。カテゴリが0件のときは初期カテゴリが5件作られます。
       </p>
       <button
@@ -156,6 +224,41 @@ export default function DataCheck() {
           </li>
         ))}
       </ul>
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
+      <h2 className="text-lg font-semibold">Googleカレンダーの同期（{thisMonth()}）</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        Googleカレンダーの今月の予定を、アプリの予定に同期します。新しい予定は種類 other・予想金額 0円で入ります。
+      </p>
+      <button
+        type="button"
+        onClick={syncNow}
+        disabled={syncing}
+        className="self-start rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+      >
+        {syncing ? "同期中…" : "Googleカレンダーを同期"}
+      </button>
+      {syncError && <p className="text-sm text-red-600">❌ {syncError}</p>}
+      {syncResult && (
+        <>
+          <p className="font-medium">
+            ✅ 追加 {syncResult.added}件・更新 {syncResult.updated}件・削除 {syncResult.deleted}件
+          </p>
+          <p className="text-sm">今月の予定：{events.length}件</p>
+          <ul className="flex flex-col gap-1 text-sm">
+            {events.map((e) => (
+              <li key={e.id} className="break-all">
+                <span className="font-mono">{formatDateTime(e.starts_at)}</span>　{e.title}
+                <span className="text-zinc-500">
+                  （{e.kind}・{e.estimated_amount.toLocaleString()}円
+                  {e.google_event_id ? "・Google" : "・手入力"}）
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </main>
   );
 }
