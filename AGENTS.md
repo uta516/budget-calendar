@@ -23,6 +23,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - ブランチ名は feature/〇〇（機能）、fix/〇〇（修正）、chore/〇〇（設定など）
 - PRの本文は .github/pull_request_template.md の形に従って、全項目を埋める
 - PRは1つの機能（ユーザーストーリー1〜3個）ごとに小さく出す
+- PRのユーザーストーリー番号は docs/user-stories.md を見て No.〇 の形で書く。作業が終わったら状態を更新する
 - 他の1人以上が確認してから main に入れる
 
 ## 計算の関数（src/lib/budget.ts）
