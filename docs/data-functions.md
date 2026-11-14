@@ -41,8 +41,25 @@ Supabase のデータを読み書きする関数です。中身は `src/lib/supa
 | | `saveGoal({ name, targetAmount, months, savedAmount })` | 保存した目標（1人1つ。無ければ作成、あれば更新） |
 | 設定 | `getSettings()` | `{ hourlyWage, nightRate, holidayBonus }`。まだ無ければ初期値（1100・1.25・0） |
 | | `saveSettings({ hourlyWage, nightRate, holidayBonus })` | 保存した設定 |
+| 予定 | `getEvents(month)` | その月（日本時間）に始まる予定の配列（開始日時の早い順）。`month` は `"2026-11"` の形 |
+| | `addEvent({ title, kind, startsAt, endsAt?, estimatedAmount })` | 追加した予定（手入力の予定） |
+| | `updateEvent(id, { title, kind, startsAt, endsAt?, estimatedAmount })` | 変更した予定 |
+| | `deleteEvent(id)` | なし（その予定に結びついた支出は残り、結びつきだけ外れる） |
+| | `syncGoogleCalendar(month)` | `{ added, updated, deleted }`。Googleカレンダーのその月の予定をアプリに同期する |
 
-型も import できます：`Income`、`FixedCost`、`Category`、`Expense`、`Goal`、`Settings`。
+型も import できます：`Income`、`FixedCost`、`Category`、`Expense`、`Goal`、`Settings`、`Event`、`EventKind`、`SyncResult`。
+
+### 予定について
+
+- `kind`（種類）は `drink`（飲み会）／`meal`（食事）／`fun`（遊び）／`trip`（旅行）／`shop`（買い物）／`work`（バイト）／`other`（その他）のどれか。それ以外は Error。一覧は `EVENT_KINDS` で import できる
+- `startsAt`・`endsAt` は ISO 形式の文字列（例：`"2026-11-20T19:00:00+09:00"`）。戻り値の `starts_at` は UTC 表記（`...+00:00`）で返ってくるので、表示するときは `new Date(starts_at).toLocaleString("ja-JP")` などで日本時間にする
+- `google_event_id` が入っている予定は Googleカレンダーから読み込んだもの、null は手入力の予定
+- `syncGoogleCalendar` の決まり
+  - 新しく入る予定は `kind: "other"`、`estimated_amount: 0`
+  - すでにある予定は、タイトルと日時だけ更新する（ユーザーが直した種類と金額は消さない）
+  - Googleで消された予定は、アプリでも消える
+  - 「もう一度ログインしてください」の Error が出たら、ログアウトしてログインし直してもらう
+- 終日の予定は、その日の 0:00（日本時間）に始まり、翌日の 0:00 に終わる予定として入る
 
 ## 呼び出し例
 
@@ -130,6 +147,30 @@ await saveGoal({ name: "春休みの旅行資金", targetAmount: 30000, months: 
 ```ts
 const settings = await getSettings(); // 無ければ { hourlyWage: 1100, nightRate: 1.25, holidayBonus: 0 }
 await saveSettings({ ...settings, hourlyWage: 1200 });
+```
+
+### 予定
+
+```ts
+const events = await getEvents("2026-11");
+
+const event = await addEvent({
+  title: "サークルの飲み会",
+  kind: "drink",
+  startsAt: "2026-11-20T19:00:00+09:00",
+  endsAt: "2026-11-20T22:00:00+09:00",
+  estimatedAmount: 4000,
+});
+await updateEvent(event.id, {
+  title: "サークルの飲み会",
+  kind: "drink",
+  startsAt: "2026-11-20T19:00:00+09:00",
+  estimatedAmount: 3500,
+});
+await deleteEvent(event.id);
+
+// Googleカレンダーの今月の予定を読み込む（カレンダー画面を開いたときなど）
+const { added, updated, deleted } = await syncGoogleCalendar("2026-11");
 ```
 
 ### エラーの受け取り方

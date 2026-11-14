@@ -7,3 +7,4 @@ export * from "./categories";
 export * from "./expenses";
 export * from "./goals";
 export * from "./settings";
+export * from "./events";
