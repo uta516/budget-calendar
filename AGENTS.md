@@ -13,7 +13,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - データの型は src/types/database.ts を使う（手で書き換えない）
 - 担当外のファイルは変更しない
   - 画面：src/app の各ページ、src/components
-  - データ：src/lib/supabase、src/app/api/calendar、supabase/
+  - データ・連携：src/lib/supabase、src/app/api/calendar、src/app/login、src/app/auth、src/proxy.ts、supabase/
   - 計算：src/lib/budget.ts、テスト、src/app/api/ai
 - 計算処理は src/lib/budget.ts に書き、必ずテストを付ける
 - APIキーなどの秘密はコードに書かず、環境変数を使う
