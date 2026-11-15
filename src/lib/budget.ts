@@ -1,4 +1,4 @@
-// freeMoneyとmonthLeftは実装済み。他の関数は仮の値を返す。
+// categoryLeftは仮の値を返す。他の計算関数は実装済み。
 // 決まりは AGENTS.md の「計算の関数」を見ること。
 
 /** 今月自由に使えるお金 */
@@ -13,17 +13,19 @@ export function monthLeft(free: number, spentThisMonth: number): number {
 
 /** 今週の予算 */
 export function weekBudget(free: number, today: Date): number {
-  return 0;
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  return Math.floor(((free / daysInMonth) * 7) / 10) * 10;
 }
 
 /** 今週あと使えるお金 */
 export function weekLeft(weekly: number, spentThisWeek: number): number {
-  return 0;
+  return weekly - spentThisWeek;
 }
 
 /** 今日の目安 */
 export function todayGuide(weekLeftAmount: number, today: Date): number {
-  return 0;
+  const daysRemaining = today.getDay() === 0 ? 1 : 8 - today.getDay();
+  return Math.max(0, Math.floor(weekLeftAmount / daysRemaining / 10) * 10);
 }
 
 /** カテゴリ別の残り */
