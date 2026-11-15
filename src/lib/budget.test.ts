@@ -5,6 +5,7 @@ import {
   weekBudget,
   weekLeft,
   todayGuide,
+  categoryLeft,
 } from "./budget";
 
 describe("freeMoney", () => {
@@ -98,5 +99,19 @@ describe("todayGuide", () => {
     const originalTime = today.getTime();
     expect(todayGuide(8400, today)).toBe(4200);
     expect(today.getTime()).toBe(originalTime);
+  });
+});
+
+describe("categoryLeft", () => {
+  it.each([
+    [25000, 11200, 13800],
+    [10000, 10000, 0],
+    [10000, 12000, -2000],
+    [10000, 0, 10000],
+    [0, 1000, -1000],
+    [0, 0, 0],
+    [1001, 2, 999],
+  ])("カテゴリ予算%d円・使用額%d円なら残額は%d円", (budget, spent, expected) => {
+    expect(categoryLeft(budget, spent)).toBe(expected);
   });
 });
