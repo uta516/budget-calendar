@@ -1,14 +1,14 @@
-// 計算担当が中身を作る。今は仮の値を返す。
+// freeMoneyとmonthLeftは実装済み。他の関数は仮の値を返す。
 // 決まりは AGENTS.md の「計算の関数」を見ること。
 
 /** 今月自由に使えるお金 */
 export function freeMoney(income: number, fixedCosts: number, saving: number): number {
-  return 0;
+  return Math.max(0, income - fixedCosts - saving);
 }
 
 /** 今月あと使えるお金 */
 export function monthLeft(free: number, spentThisMonth: number): number {
-  return 0;
+  return free - spentThisMonth;
 }
 
 /** 今週の予算 */
