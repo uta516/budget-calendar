@@ -1,4 +1,4 @@
-// categoryLeftは仮の値を返す。他の計算関数は実装済み。
+// 中間発表向けの計算関数は実装済み。
 // 決まりは AGENTS.md の「計算の関数」を見ること。
 
 /** 今月自由に使えるお金 */
@@ -30,5 +30,5 @@ export function todayGuide(weekLeftAmount: number, today: Date): number {
 
 /** カテゴリ別の残り */
 export function categoryLeft(budget: number, spent: number): number {
-  return 0;
+  return budget - spent;
 }
