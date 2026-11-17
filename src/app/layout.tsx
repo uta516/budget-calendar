@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import TabBar from "@/components/TabBar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,10 +21,16 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
+      lang="ja"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {/* 下のタブバーに中身が隠れないように余白をあける */}
+        <div className="flex flex-1 flex-col pb-[calc(4rem+env(safe-area-inset-bottom))]">
+          {children}
+        </div>
+        <TabBar />
+      </body>
     </html>
   );
 }
