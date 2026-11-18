@@ -162,18 +162,21 @@ export type Database = {
         Row: {
           access_token: string
           expires_at: string
+          last_synced_at: string | null
           refresh_token: string | null
           user_id: string
         }
         Insert: {
           access_token: string
           expires_at: string
+          last_synced_at?: string | null
           refresh_token?: string | null
           user_id: string
         }
         Update: {
           access_token?: string
           expires_at?: string
+          last_synced_at?: string | null
           refresh_token?: string | null
           user_id?: string
         }

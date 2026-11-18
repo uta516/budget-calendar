@@ -45,9 +45,10 @@ Supabase のデータを読み書きする関数です。中身は `src/lib/supa
 | | `addEvent({ title, kind, startsAt, endsAt?, estimatedAmount })` | 追加した予定（手入力の予定） |
 | | `updateEvent(id, { title, kind, startsAt, endsAt?, estimatedAmount })` | 変更した予定 |
 | | `deleteEvent(id)` | なし（その予定に結びついた支出は残り、結びつきだけ外れる） |
-| | `syncGoogleCalendar(month)` | `{ added, updated, deleted }`。Googleカレンダーのその月の予定をアプリに同期する |
+| | `syncGoogleCalendar(month)` | `{ added, updated, deleted }`。Googleカレンダーのその月の予定をアプリに同期する（手動の同期。「今すぐ同期」ボタンなど） |
+| | `autoSyncCalendar()` | `{ synced, reason?, added, updated, deleted, lastSyncedAt, error?, needsRelogin? }`。前の自動同期から30分以上たっていれば、今月と来月を同期する。**Error を投げない** |
 
-型も import できます：`Income`、`FixedCost`、`Category`、`Expense`、`Goal`、`Settings`、`Event`、`EventKind`、`SyncResult`。
+型も import できます：`Income`、`FixedCost`、`Category`、`Expense`、`Goal`、`Settings`、`Event`、`EventKind`、`SyncResult`、`AutoSyncResult`。
 
 ### 予定について
 
@@ -59,6 +60,13 @@ Supabase のデータを読み書きする関数です。中身は `src/lib/supa
   - すでにある予定は、タイトルと日時だけ更新する（ユーザーが直した種類と金額は消さない）
   - Googleで消された予定は、アプリでも消える
   - 「もう一度ログインしてください」の Error が出たら、ログアウトしてログインし直してもらう
+- 自動同期（`autoSyncCalendar`）の決まり
+  - **ホームとカレンダーを開いたときに呼ぶ**。前の自動同期から30分たっていなければ、何もせずにすぐ返る（30分の判定はサーバー側なので、何度呼んでもよい）
+  - 同期するのは今月と来月（日本時間）。決まりは `syncGoogleCalendar` と同じ
+  - ログインした直後にも、今月と来月を自動で同期している（8秒を超えたら打ち切ってホームに移動し、ホームを開いたときの自動同期でやり直す）
+  - 失敗しても Error は投げず、`synced: false, reason: "error", error: "…"` を返す。`needsRelogin` が true なら、ログインし直してもらう
+  - 同期したあとは、`getEvents` や `getHomeSummary` を読み直すと新しい予定が反映される
+  - 最後に自動同期した時刻は `lastSyncedAt`（google_tokens.last_synced_at）。手動の `syncGoogleCalendar` では変わらない
 - 終日の予定は、その日の 0:00（日本時間）に始まり、翌日の 0:00 に終わる予定として入る
 
 ## 呼び出し例
@@ -169,8 +177,23 @@ await updateEvent(event.id, {
 });
 await deleteEvent(event.id);
 
-// Googleカレンダーの今月の予定を読み込む（カレンダー画面を開いたときなど）
+// 「今すぐ同期」ボタンなどで、指定した月を同期する
 const { added, updated, deleted } = await syncGoogleCalendar("2026-11");
+```
+
+### 自動同期（ホーム・カレンダーを開いたとき）
+
+```tsx
+useEffect(() => {
+  (async () => {
+    const result = await autoSyncCalendar(); // Error は投げない
+    if (result.needsRelogin) {
+      setMessage("Googleカレンダーと連携するため、もう一度ログインしてください");
+    } else if (result.synced && result.added + result.updated + result.deleted > 0) {
+      setHome(await getHomeSummary()); // 予定が変わったので読み直す
+    }
+  })();
+}, []);
 ```
 
 ### エラーの受け取り方

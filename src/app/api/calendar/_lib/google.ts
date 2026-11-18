@@ -31,6 +31,7 @@ export type EventTimes = {
 /** refresh_token で新しい access_token をもらう */
 export async function refreshAccessToken(
   refreshToken: string,
+  signal?: AbortSignal,
 ): Promise<{ accessToken: string; expiresAt: string }> {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -49,6 +50,7 @@ export async function refreshAccessToken(
       client_id: clientId,
       client_secret: clientSecret,
     }),
+    signal,
   });
   const body = (await res.json().catch(() => null)) as {
     access_token?: string;
@@ -69,10 +71,15 @@ export async function refreshAccessToken(
   };
 }
 
-async function callCalendar(url: string, accessToken: string): Promise<Response> {
+async function callCalendar(
+  url: string,
+  accessToken: string,
+  signal?: AbortSignal,
+): Promise<Response> {
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
+    signal,
   });
   if (res.status === 401 || res.status === 403) {
     // 401：トークンが無効。403：calendar.events の権限が無い
@@ -86,6 +93,7 @@ export async function listEvents(
   accessToken: string,
   timeMin: string,
   timeMax: string,
+  signal?: AbortSignal,
 ): Promise<GoogleEvent[]> {
   const events: GoogleEvent[] = [];
   let pageToken: string | undefined;
@@ -100,7 +108,7 @@ export async function listEvents(
     });
     if (pageToken) params.set("pageToken", pageToken);
 
-    const res = await callCalendar(`${EVENTS_URL}?${params}`, accessToken);
+    const res = await callCalendar(`${EVENTS_URL}?${params}`, accessToken, signal);
     if (!res.ok) {
       throw new GoogleApiError(`予定の一覧の取得に失敗しました（${res.status}）`);
     }
@@ -119,10 +127,12 @@ export async function listEvents(
 export async function getEvent(
   accessToken: string,
   eventId: string,
+  signal?: AbortSignal,
 ): Promise<GoogleEvent | null> {
   const res = await callCalendar(
     `${EVENTS_URL}/${encodeURIComponent(eventId)}`,
     accessToken,
+    signal,
   );
   if (res.status === 404 || res.status === 410) return null;
   if (!res.ok) {

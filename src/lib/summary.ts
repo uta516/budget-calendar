@@ -28,7 +28,7 @@ import {
   type Goal,
   type Income,
 } from "./supabase";
-import { isMonth } from "./supabase/month";
+import { isMonth, nextMonth, toJstDate } from "./supabase/month";
 
 // ───────── 戻り値の型 ─────────
 
@@ -131,17 +131,8 @@ export type BudgetSummary = {
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
-const jstDateFormat = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Asia/Tokyo",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-/** 日時 → 日本時間の日付 "YYYY-MM-DD" */
-export function toJstDate(value: Date | string): string {
-  return jstDateFormat.format(typeof value === "string" ? new Date(value) : value);
-}
+// toJstDate は month.ts にまとめた（これまでどおり summary からも import できる）
+export { toJstDate };
 
 function parts(date: string): [number, number, number] {
   const [y, m, d] = date.split("-").map(Number);
@@ -165,10 +156,6 @@ function mondayOf(date: string): string {
   return addDays(date, -((dayOfWeek(date) + 6) % 7));
 }
 
-function nextMonth(month: string): string {
-  const [y, m] = month.split("-").map(Number);
-  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
-}
 
 /**
  * budget.ts の関数に渡す Date。日本時間の暦（年・月・日・曜日）を、
