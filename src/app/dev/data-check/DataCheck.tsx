@@ -408,6 +408,11 @@ export default function DataCheck() {
             <li>今月の収入合計：{yen(budget.incomeTotal)}</li>
             <li>今月あと使えるお金：{yen(budget.monthLeft)}</li>
             <li>カテゴリなしの支出：{yen(budget.uncategorizedSpent)}</li>
+            <li>
+              カテゴリなしの予定：{yen(budget.uncategorizedPlanned)}
+              {budget.uncategorizedPlannedEvents.length > 0 &&
+                `（${budget.uncategorizedPlannedEvents.map((e) => e.title).join("・")}）`}
+            </li>
           </ul>
           <table className="w-full text-left">
             <thead>
@@ -421,7 +426,11 @@ export default function DataCheck() {
                   <td>{c.name}</td>
                   <td>{yen(c.budget)}</td>
                   <td>{yen(c.spent)}</td>
-                  <td>{yen(c.planned)}</td>
+                  <td>
+                    {yen(c.planned)}
+                    {c.plannedEvents.length > 0 &&
+                      `（${c.plannedEvents.map((e) => e.title).join("・")}）`}
+                  </td>
                   <td className={c.left < 0 ? "text-red-600" : ""}>{yen(c.left)}</td>
                 </tr>
               ))}
