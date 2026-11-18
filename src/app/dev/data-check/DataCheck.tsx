@@ -31,6 +31,19 @@ import {
   type EventKind,
   type SyncResult,
 } from "@/lib/supabase";
+import {
+  getBudgetSummary,
+  getHomeSummary,
+  type BudgetSummary,
+  type HomeSummary,
+} from "@/lib/summary";
+
+import { clearDemoData, seedDemoData } from "./seed";
+
+const yen = (n: number) => `${n.toLocaleString()}円`;
+
+const DEMO_WARNING =
+  "自分のアカウントの収入・固定費・支出・手入力の予定・目標がすべて消えます（カテゴリ・設定・Googleから同期した予定は残ります）。";
 
 type Result = { ok: boolean; label: string; detail: string };
 
@@ -56,6 +69,62 @@ export default function DataCheck() {
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
+
+  const [home, setHome] = useState<HomeSummary | null>(null);
+  const [budget, setBudget] = useState<BudgetSummary | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+
+  async function loadSummary(kind: "home" | "budget") {
+    setSummaryLoading(true);
+    setSummaryError(null);
+    try {
+      if (kind === "home") setHome(await getHomeSummary());
+      else setBudget(await getBudgetSummary());
+    } catch (e) {
+      setSummaryError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSummaryLoading(false);
+    }
+  }
+
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoMessage, setDemoMessage] = useState<string | null>(null);
+
+  async function seedDemo() {
+    if (!window.confirm(`見本データを入れます。\n${DEMO_WARNING}\nよろしいですか？`)) return;
+    setDemoBusy(true);
+    setDemoMessage(null);
+    try {
+      const r = await seedDemoData();
+      setDemoMessage(
+        `✅ 入れました：収入${r.incomes}件・固定費${r.fixedCosts}件・目標1件・支出${r.expenses}件（合計${yen(r.expenseTotal)}）・予定${r.events}件` +
+          (r.eventsSkipped ? "（今日が月末なので、予定は入れていません）" : ""),
+      );
+      setBudget(null);
+      await loadSummary("home");
+    } catch (e) {
+      setDemoMessage(`❌ ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
+  async function clearDemo() {
+    if (!window.confirm(`見本データを消します。\n${DEMO_WARNING}\nよろしいですか？`)) return;
+    setDemoBusy(true);
+    setDemoMessage(null);
+    try {
+      await clearDemoData();
+      setDemoMessage("✅ 消しました（カテゴリ・設定・Googleから同期した予定は残っています）");
+      setHome(null);
+      setBudget(null);
+    } catch (e) {
+      setDemoMessage(`❌ ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDemoBusy(false);
+    }
+  }
 
   async function syncNow() {
     setSyncing(true);
@@ -224,6 +293,139 @@ export default function DataCheck() {
           </li>
         ))}
       </ul>
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
+      <h2 className="text-lg font-semibold">見本データ（デモ用）</h2>
+      <p className="text-sm text-red-600">⚠ {DEMO_WARNING}</p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={seedDemo}
+          disabled={demoBusy}
+          className="rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+        >
+          見本データを入れる
+        </button>
+        <button
+          type="button"
+          onClick={clearDemo}
+          disabled={demoBusy}
+          className="rounded-full border border-black/[.08] px-5 py-2 disabled:opacity-50 dark:border-white/[.145]"
+        >
+          見本データを消す
+        </button>
+      </div>
+      {demoBusy && <p className="text-sm">処理中…</p>}
+      {demoMessage && <p className="text-sm">{demoMessage}</p>}
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
+      <h2 className="text-lg font-semibold">まとめの関数（src/lib/summary.ts）</h2>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => loadSummary("home")}
+          disabled={summaryLoading}
+          className="rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+        >
+          ホームのまとめ
+        </button>
+        <button
+          type="button"
+          onClick={() => loadSummary("budget")}
+          disabled={summaryLoading}
+          className="rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+        >
+          予算のまとめ
+        </button>
+      </div>
+      {summaryError && <p className="text-sm text-red-600">❌ {summaryError}</p>}
+
+      {home && (
+        <section className="flex flex-col gap-2 text-sm">
+          <h3 className="font-semibold">getHomeSummary()（今日 {home.today}）</h3>
+          <ul>
+            <li>今月自由に使えるお金：{yen(home.freeMoney)}</li>
+            <li>今月あと使えるお金：{yen(home.monthLeft)}</li>
+            <li>今週の予算：{yen(home.weekBudget)}・今週使った額：{yen(home.weekSpent)}・今週あと：{yen(home.weekLeft)}</li>
+            <li>今日の目安：{yen(home.todayGuide)}</li>
+            <li>
+              月末までに予定で使う見込み：{yen(home.plannedUntilMonthEnd.amount)}（{home.plannedUntilMonthEnd.count}件）
+            </li>
+            <li>普段使いに回せるお金：{yen(home.dailyMoney)}</li>
+          </ul>
+          <table className="w-full text-left">
+            <thead>
+              <tr>
+                <th>日付</th><th>目安</th><th>使った額</th><th>予定</th>
+              </tr>
+            </thead>
+            <tbody>
+              {home.days.map((d) => (
+                <tr key={d.date} className={d.isToday ? "font-semibold" : d.inMonth ? "" : "text-zinc-400"}>
+                  <td>{d.date.slice(5)}({d.weekday}){d.isToday ? " 今日" : ""}</td>
+                  <td>{d.guide === null ? "−" : yen(d.guide)}</td>
+                  <td>{yen(d.spent)}</td>
+                  <td>{d.eventCount}件・{yen(d.plannedAmount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p>これからの予定：</p>
+          <ul>
+            {home.upcomingEvents.length === 0 && <li>なし</li>}
+            {home.upcomingEvents.map((e) => (
+              <li key={e.id}>
+                {e.date}　{e.title}（{e.kind}・{yen(e.estimatedAmount)}）
+              </li>
+            ))}
+          </ul>
+          <details>
+            <summary>戻り値（JSON）</summary>
+            <pre className="overflow-x-auto text-xs">{JSON.stringify(home, null, 2)}</pre>
+          </details>
+        </section>
+      )}
+
+      {budget && (
+        <section className="flex flex-col gap-2 text-sm">
+          <h3 className="font-semibold">getBudgetSummary()（{budget.month}）</h3>
+          <ul>
+            <li>今月の収入合計：{yen(budget.incomeTotal)}</li>
+            <li>今月あと使えるお金：{yen(budget.monthLeft)}</li>
+            <li>カテゴリなしの支出：{yen(budget.uncategorizedSpent)}</li>
+          </ul>
+          <table className="w-full text-left">
+            <thead>
+              <tr>
+                <th>カテゴリ</th><th>予算</th><th>使った額</th><th>予定</th><th>残り</th>
+              </tr>
+            </thead>
+            <tbody>
+              {budget.categories.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.name}</td>
+                  <td>{yen(c.budget)}</td>
+                  <td>{yen(c.spent)}</td>
+                  <td>{yen(c.planned)}</td>
+                  <td className={c.left < 0 ? "text-red-600" : ""}>{yen(c.left)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p>
+            目標：
+            {budget.goal
+              ? `${budget.goal.name}　目標 ${yen(budget.goal.targetAmount)}・たまった ${yen(budget.goal.savedAmount)}・あと ${yen(budget.goal.remaining)}・月に ${yen(budget.goal.perMonth)}`
+              : "なし"}
+          </p>
+          <details>
+            <summary>戻り値（JSON）</summary>
+            <pre className="overflow-x-auto text-xs">{JSON.stringify(budget, null, 2)}</pre>
+          </details>
+        </section>
+      )}
 
       <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
 
