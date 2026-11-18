@@ -183,6 +183,86 @@ try {
 }
 ```
 
+## まとめの関数（src/lib/summary.ts）
+
+データを読み込み、`src/lib/budget.ts` の計算までして、**画面がそのまま表示できる数字**を返す関数です。画面では、収入や支出を自分で合計したり、budget.ts を呼んだりしなくて大丈夫です。
+
+```ts
+import { getHomeSummary, getBudgetSummary } from "@/lib/summary";
+```
+
+- `"use client"` のコンポーネントから呼ぶ（中でデータの関数を使うため）
+- 金額はすべて円の整数。データが0件でもエラーにせず、0円で返す
+- 日付は日本時間、週は月曜はじまり
+- 目標がある場合は、目標の「月にいくら」を貯金として引いてから、自由に使えるお金を計算する
+- 型も import できる：`HomeSummary`、`DayGuide`、`UpcomingEvent`、`BudgetSummary`、`CategorySummary`、`GoalSummary`
+
+### getHomeSummary(today?) … ホーム画面
+
+`today`（Date）を省略したら今。戻り値 `HomeSummary`：
+
+| 項目 | 意味 |
+|---|---|
+| `today` / `month` | 今日 `"2026-11-18"`、今月 `"2026-11"`（日本時間） |
+| `freeMoney` | 今月自由に使えるお金（収入 − 固定費 − 目標の月の貯金） |
+| `monthLeft` | 今月あと使えるお金 |
+| `weekBudget` | 今週の予算 |
+| `weekSpent` | 今週使った額（今週のうち、今日と同じ月の日の分だけ） |
+| `weekLeft` | 今週あと使えるお金 |
+| `todayGuide` | 今日の目安 |
+| `plannedUntilMonthEnd` | `{ amount, count }`：今日から月末までの予定の予想金額の合計と件数 |
+| `dailyMoney` | 普段使いに回せるお金（今月あと − 予定で使う見込み。マイナスもそのまま） |
+| `days` | 今週（月〜日）の7日分。下の表 |
+| `upcomingEvents` | これからの予定（今日以降、近い順に最大3件）：`{ id, title, kind, startsAt, date, estimatedAmount }` |
+
+`days` の1日分（`DayGuide`）：
+
+| 項目 | 意味 |
+|---|---|
+| `date` / `weekday` | `"2026-11-18"` / `"水"` |
+| `isToday` / `isPast` | 今日か、今日より前か |
+| `inMonth` | 今日と同じ月の日か（月をまたぐ週で、前後の月の日は false。灰色にするなどに使う） |
+| `guide` | その日の目安。過ぎた日は `null`。今は今日以降の日を均等に割った額（予定を考えた計算ができたら変わる） |
+| `spent` | その日に使った額（今日と同じ月の日だけ。前の月の日は0） |
+| `plannedAmount` / `eventCount` | その日の予定の予想金額の合計と件数 |
+
+```tsx
+const [home, setHome] = useState<HomeSummary | null>(null);
+useEffect(() => {
+  getHomeSummary().then(setHome).catch((e: Error) => setError(e.message));
+}, []);
+
+// 表示例
+<p>今週あと {home.weekLeft.toLocaleString()}円</p>
+<p>今日の目安 {home.todayGuide.toLocaleString()}円</p>
+{home.days.map((d) => (
+  <span key={d.date}>{d.weekday} {d.guide === null ? "−" : `${d.guide}円`}</span>
+))}
+```
+
+### getBudgetSummary(month?) … 予算画面
+
+`month`（`"2026-11"`）を省略したら今月。戻り値 `BudgetSummary`：
+
+| 項目 | 意味 |
+|---|---|
+| `month` | `"2026-11"` |
+| `incomeTotal` | 収入の合計 |
+| `monthLeft` | その月あと使えるお金 |
+| `categories` | カテゴリごとの `{ id, name, budget, spent, planned, left }`（予算・使った額・予定の額・残り）。`planned` は、予定とカテゴリを結びつけるまでは0。`left` はマイナスもそのまま |
+| `uncategorizedSpent` | カテゴリなし（カテゴリを削除した）の支出の合計 |
+| `goal` | `{ name, targetAmount, savedAmount, remaining, perMonth }`（目標額・たまった額・あといくら・月にいくら）。目標が無ければ `null` |
+
+`perMonth` は（目標額 − たまった額）÷ 月数を1円単位で切り上げた額です。達成したら0になります。
+
+```ts
+const summary = await getBudgetSummary();
+summary.categories.forEach((c) => console.log(c.name, c.left));
+if (summary.goal) console.log(`あと${summary.goal.remaining}円、月に${summary.goal.perMonth}円`);
+```
+
+※ カテゴリが0件の人には、先に `ensureDefaultCategories()` を呼んでおく（`getBudgetSummary` はカテゴリを作らない）
+
 ## 動作確認ページ
 
 `npm run dev` のあと、ログインして http://localhost:3000/dev/data-check を開き、「すべて試す」を押すと各関数を順に試せます（本番では開けません）。
