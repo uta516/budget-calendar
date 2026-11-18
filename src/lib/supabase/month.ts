@@ -5,6 +5,29 @@ const MONTH_PATTERN = /^(\d{4})-(0[1-9]|1[0-2])$/;
 /** 日本時間のオフセット。月の区切りは日本時間で行う */
 export const JST_OFFSET = "+09:00";
 
+const jstDateFormat = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Tokyo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** 日時 → 日本時間の日付 "YYYY-MM-DD"（ブラウザ・サーバーのタイムゾーンに関係なく） */
+export function toJstDate(value: Date | string): string {
+  return jstDateFormat.format(typeof value === "string" ? new Date(value) : value);
+}
+
+/** 日本時間の今月 "2026-11" */
+export function currentMonth(now: Date = new Date()): string {
+  return toJstDate(now).slice(0, 7);
+}
+
+/** "2026-11" → "2026-12"、"2026-12" → "2027-01" */
+export function nextMonth(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+}
+
 /** "2026-11" の形なら true */
 export function isMonth(value: unknown): value is string {
   return typeof value === "string" && MONTH_PATTERN.test(value);

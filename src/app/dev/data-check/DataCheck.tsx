@@ -23,6 +23,8 @@ import {
   saveGoal,
   saveSettings,
   syncGoogleCalendar,
+  autoSyncCalendar,
+  type AutoSyncResult,
   updateCategory,
   updateEvent,
   updateFixedCost,
@@ -124,6 +126,17 @@ export default function DataCheck() {
     } finally {
       setDemoBusy(false);
     }
+  }
+
+  const [autoSyncing, setAutoSyncing] = useState(false);
+  const [autoResult, setAutoResult] = useState<AutoSyncResult | null>(null);
+
+  async function tryAutoSync() {
+    setAutoSyncing(true);
+    setAutoResult(null);
+    // autoSyncCalendar は Error を投げないので try/catch は不要
+    setAutoResult(await autoSyncCalendar());
+    setAutoSyncing(false);
   }
 
   async function syncNow() {
@@ -460,6 +473,46 @@ export default function DataCheck() {
             ))}
           </ul>
         </>
+      )}
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
+      <h2 className="text-lg font-semibold">自動同期（autoSyncCalendar）</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        前の自動同期から30分以上たっていれば、今月と来月を同期します（30分の判定はサーバー側）。
+        30分たっていなければ何もしません。手動の「Googleカレンダーを同期」では、最後に同期した時刻は変わりません。
+      </p>
+      <button
+        type="button"
+        onClick={tryAutoSync}
+        disabled={autoSyncing}
+        className="self-start rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+      >
+        {autoSyncing ? "確認中…" : "自動同期を試す"}
+      </button>
+      {autoResult && (
+        <div className="flex flex-col gap-1 text-sm">
+          {autoResult.synced ? (
+            <p className="font-medium">
+              ✅ 同期しました：追加 {autoResult.added}件・更新 {autoResult.updated}件・削除 {autoResult.deleted}件
+            </p>
+          ) : autoResult.reason === "recent" ? (
+            <p className="font-medium">⏸ 前の同期から30分たっていないので、同期しませんでした</p>
+          ) : (
+            <p className="font-medium text-red-600">
+              ❌ {autoResult.error}
+              {autoResult.needsRelogin ? "（再ログインが必要）" : ""}
+            </p>
+          )}
+          <p>
+            最後に同期した時刻（last_synced_at）：
+            {autoResult.lastSyncedAt
+              ? new Date(autoResult.lastSyncedAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
+              : autoResult.reason === "error"
+                ? "取得できませんでした"
+                : "まだ同期していない"}
+          </p>
+        </div>
       )}
     </main>
   );
