@@ -272,15 +272,49 @@ useEffect(() => {
 | `month` | `"2026-11"` |
 | `incomeTotal` | 収入の合計 |
 | `monthLeft` | その月あと使えるお金 |
-| `categories` | カテゴリごとの `{ id, name, budget, spent, planned, left }`（予算・使った額・予定の額・残り）。`planned` は、予定とカテゴリを結びつけるまでは0。`left` はマイナスもそのまま |
+| `categories` | カテゴリごとの `{ id, name, budget, spent, planned, plannedEvents, left }`（予算・使った額・予定の額・予定の一覧・残り）。下の表 |
 | `uncategorizedSpent` | カテゴリなし（カテゴリを削除した）の支出の合計 |
+| `uncategorizedPlanned` / `uncategorizedPlannedEvents` | 入れるカテゴリが見つからなかった予定（「その他」も無いとき）の予想金額の合計と、その一覧 |
 | `goal` | `{ name, targetAmount, savedAmount, remaining, perMonth }`（目標額・たまった額・あといくら・月にいくら）。目標が無ければ `null` |
+
+`categories` の1件分（`CategorySummary`）：
+
+| 項目 | 意味 |
+|---|---|
+| `budget` | 月の予算 |
+| `spent` | 使った額（モックの緑） |
+| `planned` | 予定で使う額（モックのオレンジ）。今日以降でその月の予定の予想金額を、予定の種類からカテゴリに振り分けた合計 |
+| `plannedEvents` | そのカテゴリに入った予定 `{ id, title, date, amount }` の一覧（日付の早い順）。予想金額が0円の予定は入れない |
+| `left` | 残り（予算 − 使った額 − 予定の額）。マイナスもそのまま |
+
+予定の種類 → カテゴリ（`KIND_TO_CATEGORY` で import できる）：
+
+| 種類 | カテゴリ |
+|---|---|
+| drink（飲み会）・fun（遊び） | 交際費 |
+| meal（食事） | 食費 |
+| trip（旅行） | 旅行 |
+| shop（買い物）・other（その他） | その他 |
+| work（バイト） | 数えない |
+
+- カテゴリは名前で探す。名前を変えたなどで見つからなければ「その他」に入れ、「その他」も無ければ `uncategorizedPlanned` に入る
+- 対象は今日以降の予定だけ。過去の月を指定すると予定の額は0、来月以降を指定するとその月の予定すべて
+- Googleから同期した予定は、種類と金額を直すまで other・0円なので数えない
 
 `perMonth` は（目標額 − たまった額）÷ 月数を1円単位で切り上げた額です。達成したら0になります。
 
-```ts
+```tsx
 const summary = await getBudgetSummary();
-summary.categories.forEach((c) => console.log(c.name, c.left));
+
+// 表示例：交際費　使った 2,500円　予定 7,500円（サークル飲み会・映画）　残り 2,000円
+summary.categories.map((c) => (
+  <p key={c.id}>
+    {c.name}　使った {c.spent.toLocaleString()}円
+    {c.planned > 0 && `　予定 ${c.planned.toLocaleString()}円（${c.plannedEvents.map((e) => e.title).join("・")}）`}
+    　残り {c.left.toLocaleString()}円
+  </p>
+));
+
 if (summary.goal) console.log(`あと${summary.goal.remaining}円、月に${summary.goal.perMonth}円`);
 ```
 

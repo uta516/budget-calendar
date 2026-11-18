@@ -23,6 +23,7 @@ import {
   getIncomes,
   type Category,
   type Event,
+  type EventKind,
   type Expense,
   type FixedCost,
   type Goal,
@@ -97,10 +98,21 @@ export type CategorySummary = {
   budget: number;
   /** 使った額 */
   spent: number;
-  /** 予定で使う額（予定とカテゴリはまだ結びつけていないので、今は0） */
+  /** 予定で使う額（今日以降・その月の予定の予想金額。予定の種類からカテゴリを決める） */
   planned: number;
+  /** そのカテゴリに入った予定（日付の早い順。予想金額が0円の予定は入れない） */
+  plannedEvents: PlannedEvent[];
   /** 残り（予算 − 使った額 − 予定の額） */
   left: number;
+};
+
+export type PlannedEvent = {
+  id: number;
+  title: string;
+  /** 日本時間の日付 "2026-11-20" */
+  date: string;
+  /** 予想金額 */
+  amount: number;
 };
 
 export type GoalSummary = {
@@ -123,6 +135,10 @@ export type BudgetSummary = {
   categories: CategorySummary[];
   /** カテゴリなし（カテゴリを削除した）の支出の合計 */
   uncategorizedSpent: number;
+  /** 入れるカテゴリが見つからなかった予定（「その他」も無いとき）の予想金額の合計 */
+  uncategorizedPlanned: number;
+  /** その予定の一覧（日付の早い順） */
+  uncategorizedPlannedEvents: PlannedEvent[];
   /** 目標。まだ無ければ null */
   goal: GoalSummary | null;
 };
@@ -183,6 +199,24 @@ export function goalProgress(goal: Pick<Goal, "target_amount" | "saved_amount" |
   const months = goal.months > 0 ? goal.months : 1;
   return { remaining, perMonth: Math.ceil(remaining / months) };
 }
+
+/**
+ * 予定の種類 → 予算のカテゴリ名。null は予算に数えない（バイトは出費ではないため）。
+ * カテゴリが見つからなければ「その他」、それも無ければカテゴリなし。
+ * 計算担当へ：予想の精度を上げるときに見直してほしい対応表
+ */
+export const KIND_TO_CATEGORY: Record<EventKind, string | null> = {
+  drink: "交際費",
+  fun: "交際費",
+  meal: "食費",
+  trip: "旅行",
+  shop: "その他",
+  other: "その他",
+  work: null,
+};
+
+/** 見つからないときに入れるカテゴリ名 */
+export const FALLBACK_CATEGORY = "その他";
 
 /** 普段使いに回せるお金（今月あと − 予定で使う見込み。マイナスもそのまま） */
 export function dailyMoneyOf(monthLeftAmount: number, plannedAmount: number): number {
@@ -279,24 +313,61 @@ export type BudgetSummaryInput = {
   categories: Pick<Category, "id" | "name" | "monthly_budget">[];
   /** その月の支出 */
   expenses: Pick<Expense, "amount" | "category_id">[];
+  /** その月の予定 */
+  events: Pick<Event, "id" | "title" | "kind" | "starts_at" | "estimated_amount">[];
 };
 
-/** 読み込んだデータから予算画面の数字を作る */
-export function buildBudgetSummary(input: BudgetSummaryInput, month: string): BudgetSummary {
+/**
+ * 読み込んだデータから予算画面の数字を作る。
+ * today は日本時間の "YYYY-MM-DD"（予定は今日以降のものだけ数える）
+ */
+export function buildBudgetSummary(
+  input: BudgetSummaryInput,
+  month: string,
+  today: string,
+): BudgetSummary {
   const progress = input.goal ? goalProgress(input.goal) : null;
   const incomeTotal = sumAmount(input.incomes);
   const free = freeMoney(incomeTotal, sumAmount(input.fixedCosts), progress?.perMonth ?? 0);
 
+  // 予定 → カテゴリ（今日以降・その月・予想金額が1円以上・work 以外）
+  const byName = new Map(input.categories.map((c) => [c.name, c.id]));
+  const fallbackId = byName.get(FALLBACK_CATEGORY);
+  const plannedByCategory = new Map<number, PlannedEvent[]>();
+  const uncategorizedPlannedEvents: PlannedEvent[] = [];
+
+  const targets = input.events
+    .map((e) => ({ event: e, date: toJstDate(e.starts_at) }))
+    .filter(({ event, date }) => date >= today && date.startsWith(month) && event.estimated_amount > 0)
+    .sort((a, b) => Date.parse(a.event.starts_at) - Date.parse(b.event.starts_at));
+
+  for (const { event, date } of targets) {
+    const name =
+      event.kind in KIND_TO_CATEGORY
+        ? KIND_TO_CATEGORY[event.kind as EventKind]
+        : FALLBACK_CATEGORY; // 決まっていない種類は「その他」と同じ扱い
+    if (name === null) continue; // バイトなどは数えない
+    const planned = { id: event.id, title: event.title, date, amount: event.estimated_amount };
+    const categoryId = byName.get(name) ?? fallbackId;
+    if (categoryId === undefined) {
+      uncategorizedPlannedEvents.push(planned);
+    } else {
+      plannedByCategory.set(categoryId, [...(plannedByCategory.get(categoryId) ?? []), planned]);
+    }
+  }
+
   const categoryIds = new Set(input.categories.map((c) => c.id));
   const categories: CategorySummary[] = input.categories.map((c) => {
     const spent = sumAmount(input.expenses.filter((e) => e.category_id === c.id));
-    const planned = 0; // 予定とカテゴリを結びつけたら、ここに予定の額を入れる
+    const plannedEvents = plannedByCategory.get(c.id) ?? [];
+    const planned = sumAmount(plannedEvents);
     return {
       id: c.id,
       name: c.name,
       budget: c.monthly_budget,
       spent,
       planned,
+      plannedEvents,
       left: categoryLeft(c.monthly_budget, spent + planned),
     };
   });
@@ -309,6 +380,8 @@ export function buildBudgetSummary(input: BudgetSummaryInput, month: string): Bu
     uncategorizedSpent: sumAmount(
       input.expenses.filter((e) => e.category_id === null || !categoryIds.has(e.category_id)),
     ),
+    uncategorizedPlanned: sumAmount(uncategorizedPlannedEvents),
+    uncategorizedPlannedEvents,
     goal:
       input.goal && progress
         ? {
@@ -347,18 +420,24 @@ export async function getHomeSummary(today: Date = new Date()): Promise<HomeSumm
 
 /** 予算画面の数字。month（"2026-11"）を省略したら今月（日本時間） */
 export async function getBudgetSummary(month?: string): Promise<BudgetSummary> {
-  const target = month ?? toJstDate(new Date()).slice(0, 7);
+  const today = toJstDate(new Date());
+  const target = month ?? today.slice(0, 7);
   if (!isMonth(target)) {
     throw new Error("月は \"2026-11\" の形で指定してください");
   }
 
-  const [incomes, fixedCosts, goal, categories, expenses] = await Promise.all([
+  const [incomes, fixedCosts, goal, categories, expenses, events] = await Promise.all([
     getIncomes(),
     getFixedCosts(),
     getGoal(),
     getCategories(),
     getExpenses(target),
+    getEvents(target),
   ]);
 
-  return buildBudgetSummary({ incomes, fixedCosts, goal, categories, expenses }, target);
+  return buildBudgetSummary(
+    { incomes, fixedCosts, goal, categories, expenses, events },
+    target,
+    today,
+  );
 }
