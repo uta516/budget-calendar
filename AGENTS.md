@@ -13,8 +13,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - データの型は src/types/database.ts を使う（手で書き換えない）
 - 担当外のファイルは変更しない
   - 画面：src/app の各ページ、src/components
-  - データ・連携：src/lib/supabase、src/lib/summary.ts、src/app/api/calendar、src/app/login、src/app/auth、src/app/dev、src/proxy.ts、supabase/、docs/data-functions.md
-  - 計算：src/lib/budget.ts、テスト、src/app/api/ai
+  - データ・連携：src/lib/supabase、src/lib/summary.ts、src/lib/ai（prompts.ts を除く。Gemini を呼ぶ仕組み）、src/app/api/ai、src/app/api/calendar、src/app/login、src/app/auth、src/app/dev、src/proxy.ts、supabase/、docs/data-functions.md
+  - 計算：src/lib/budget.ts、テスト、src/lib/ai/prompts.ts（AI に何を聞くか）
 - 計算処理は src/lib/budget.ts に書き、必ずテストを付ける
 - APIキーなどの秘密はコードに書かず、環境変数を使う
 
@@ -52,6 +52,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 設定：getSettings()（無ければ初期値）、saveSettings({ hourlyWage, nightRate, holidayBonus })
 - 予定：getEvents("2026-11")、addEvent({ title, kind, startsAt, endsAt?, estimatedAmount })、updateEvent(id, { 同じ形 })、deleteEvent(id)、syncGoogleCalendar("2026-11")（Googleカレンダーのその月の予定を同期し、{ added, updated, deleted } を返す）、autoSyncCalendar()（ホーム・カレンダーを開いたときに呼ぶ。前の自動同期から30分以上たっていれば今月と来月を同期する。Error は投げず、結果を戻り値で返す）
 - まとめ（src/lib/summary.ts）：getHomeSummary(today?)（ホーム画面の数字）、getBudgetSummary(month?)（予算画面の数字）。`import { ... } from "@/lib/summary"`
+- AI（src/lib/ai/advice.ts）：getAdvice()（先読みアドバイス1〜2文。Error は投げず、AIで作ったか決まった文かも返す）。`import { getAdvice } from "@/lib/ai/advice"`。src/lib/ai/gemini.ts はサーバー専用なので画面から import しない
 - 失敗したときは日本語のメッセージの Error を投げる
 - これらができるまで、画面は src/lib/dummy.ts の仮データを使う
 

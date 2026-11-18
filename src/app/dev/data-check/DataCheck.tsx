@@ -41,6 +41,14 @@ import {
 } from "@/lib/summary";
 
 import { clearDemoData, seedDemoData } from "./seed";
+import { getAdvice, type AdviceResult } from "@/lib/ai/advice";
+
+const ADVICE_REASON: Record<string, string> = {
+  "no-key": "サーバーに GEMINI_API_KEY が無い",
+  limit: "今日の作り直しの回数（10回）を使い切った",
+  timeout: "AI が10秒以内に答えなかった",
+  error: "AI の失敗・答えの形がおかしい など（ターミナルの [ai-advice] を見る）",
+};
 
 const yen = (n: number) => `${n.toLocaleString()}円`;
 
@@ -130,6 +138,17 @@ export default function DataCheck() {
 
   const [autoSyncing, setAutoSyncing] = useState(false);
   const [autoResult, setAutoResult] = useState<AutoSyncResult | null>(null);
+
+  const [adviceLoading, setAdviceLoading] = useState(false);
+  const [advice, setAdvice] = useState<AdviceResult | null>(null);
+
+  async function tryAdvice() {
+    setAdviceLoading(true);
+    setAdvice(null);
+    // getAdvice は Error を投げないので try/catch は不要
+    setAdvice(await getAdvice());
+    setAdviceLoading(false);
+  }
 
   async function tryAutoSync() {
     setAutoSyncing(true);
@@ -482,6 +501,47 @@ export default function DataCheck() {
             ))}
           </ul>
         </>
+      )}
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
+      <h2 className="text-lg font-semibold">先読みアドバイス（getAdvice）</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        ホームのまとめをもとに、AI（Gemini）でアドバイスを作ります。同じ日・同じデータなら使い回し、
+        支出や予定が変わったときだけ作り直します（1日10回まで。失敗も数える）。AI が使えないときは決まった文になります。
+      </p>
+      <button
+        type="button"
+        onClick={tryAdvice}
+        disabled={adviceLoading}
+        className="self-start rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+      >
+        {adviceLoading ? "作成中…" : "先読みアドバイスを試す"}
+      </button>
+      {advice && (
+        <div className="flex flex-col gap-1 text-sm">
+          {advice.advice ? (
+            <p className="rounded-lg border border-black/[.08] p-3 text-base dark:border-white/[.145]">
+              💡 {advice.advice}
+            </p>
+          ) : (
+            <p className="font-medium text-red-600">
+              ❌ {advice.error}
+              {advice.needsRelogin ? "（再ログインが必要）" : ""}
+            </p>
+          )}
+          {advice.source && (
+            <p>
+              作り方：
+              {advice.source === "ai"
+                ? advice.cached
+                  ? "🤖 AI（今日作ったものを使い回し）"
+                  : "🤖 AI（今作った）"
+                : `📝 決まった文（理由：${ADVICE_REASON[advice.reason ?? "error"] ?? advice.reason}）`}
+            </p>
+          )}
+          {advice.remainingToday !== null && <p>今日あと {advice.remainingToday} 回作り直せます</p>}
+        </div>
       )}
 
       <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />

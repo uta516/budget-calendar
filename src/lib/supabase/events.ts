@@ -4,6 +4,7 @@ import {
   assertYen,
   fail,
   getSupabase,
+  type DataClient,
   getUserId,
   requireName,
 } from "./helpers";
@@ -74,9 +75,9 @@ function toRow({ title, kind, startsAt, endsAt, estimatedAmount }: EventInput) {
 }
 
 /** その月（日本時間）に始まる予定の一覧（開始日時の早い順） */
-export async function getEvents(month: string): Promise<Event[]> {
+export async function getEvents(month: string, client?: DataClient): Promise<Event[]> {
   const { from, to } = monthTimeRange(month);
-  const { data, error } = await getSupabase()
+  const { data, error } = await getSupabase(client)
     .from("events")
     .select("*")
     .gte("starts_at", from)

@@ -4,6 +4,7 @@ import {
   assertYen,
   fail,
   getSupabase,
+  type DataClient,
   getUserId,
   todayString,
 } from "./helpers";
@@ -40,9 +41,9 @@ function monthRange(month: string): [string, string] {
 }
 
 /** その月の支出の一覧（新しい日付順） */
-export async function getExpenses(month: string): Promise<Expense[]> {
+export async function getExpenses(month: string, client?: DataClient): Promise<Expense[]> {
   const [from, to] = monthRange(month);
-  const { data, error } = await getSupabase()
+  const { data, error } = await getSupabase(client)
     .from("expenses")
     .select("*")
     .gte("spent_on", from)

@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_advice: {
+        Row: {
+          advice: string | null
+          advice_date: string
+          ai_count: number
+          data_hash: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          advice?: string | null
+          advice_date: string
+          ai_count?: number
+          data_hash?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          advice?: string | null
+          advice_date?: string
+          ai_count?: number
+          data_hash?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       categories: {
         Row: {
           id: number
