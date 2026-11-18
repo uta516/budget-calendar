@@ -28,6 +28,7 @@ import {
   type FixedCost,
   type Goal,
   type Income,
+  type DataClient,
 } from "./supabase";
 import { isMonth, nextMonth, toJstDate } from "./supabase/month";
 
@@ -397,19 +398,25 @@ export function buildBudgetSummary(
 
 // ───────── 画面から呼ぶ関数 ─────────
 
-/** ホーム画面の数字。today を省略したら今（日本時間で日付を決める） */
-export async function getHomeSummary(today: Date = new Date()): Promise<HomeSummary> {
+/**
+ * ホーム画面の数字。today を省略したら今（日本時間で日付を決める）。
+ * client は、サーバー（API）から呼ぶときだけサーバー用の Supabase クライアントを渡す。画面からは省略する
+ */
+export async function getHomeSummary(
+  today: Date = new Date(),
+  client?: DataClient,
+): Promise<HomeSummary> {
   const todayStr = toJstDate(today);
   const month = todayStr.slice(0, 7);
   // 今週の月曜が前の月なら、その月の予定も読む（日ごとの予定の件数のため）
   const months = [...new Set([mondayOf(todayStr).slice(0, 7), month, nextMonth(month)])];
 
   const [incomes, fixedCosts, goal, monthExpenses, eventLists] = await Promise.all([
-    getIncomes(),
-    getFixedCosts(),
-    getGoal(),
-    getExpenses(month),
-    Promise.all(months.map((m) => getEvents(m))),
+    getIncomes(client),
+    getFixedCosts(client),
+    getGoal(client),
+    getExpenses(month, client),
+    Promise.all(months.map((m) => getEvents(m, client))),
   ]);
 
   return buildHomeSummary(

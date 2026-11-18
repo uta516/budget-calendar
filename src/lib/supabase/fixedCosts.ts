@@ -4,6 +4,7 @@ import {
   assertYen,
   fail,
   getSupabase,
+  type DataClient,
   getUserId,
   requireName,
 } from "./helpers";
@@ -11,8 +12,8 @@ import {
 export type FixedCost = Tables<"fixed_costs">;
 
 /** 固定費の一覧（古い順） */
-export async function getFixedCosts(): Promise<FixedCost[]> {
-  const { data, error } = await getSupabase()
+export async function getFixedCosts(client?: DataClient): Promise<FixedCost[]> {
+  const { data, error } = await getSupabase(client)
     .from("fixed_costs")
     .select("*")
     .order("id");

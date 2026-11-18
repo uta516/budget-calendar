@@ -1,9 +1,17 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/types/database";
 import { createClient } from "./client";
+
+/**
+ * 読み込みの関数に渡せる Supabase クライアント。
+ * 画面から呼ぶときは省略する（ブラウザ用を使う）。サーバー（API）から呼ぶときはサーバー用を渡す
+ */
+export type DataClient = SupabaseClient<Database>;
 
 // データ関数の共通処理（画面からは直接使わない）
 
-export function getSupabase() {
-  return createClient();
+export function getSupabase(client?: DataClient): DataClient {
+  return client ?? createClient();
 }
 
 /** ログイン中のユーザーの id を返す。ログインしていなければ Error を投げる */

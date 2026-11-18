@@ -320,6 +320,44 @@ if (summary.goal) console.log(`あと${summary.goal.remaining}円、月に${summ
 
 ※ カテゴリが0件の人には、先に `ensureDefaultCategories()` を呼んでおく（`getBudgetSummary` はカテゴリを作らない）
 
+## AI の先読みアドバイス（src/lib/ai/advice.ts）
+
+ホームのまとめ（今週あと、今日の目安、予定で使う見込み、これからの予定など）をもとに、AI（Gemini）が短いアドバイスを1〜2文で作ります。
+
+```ts
+import { getAdvice } from "@/lib/ai/advice";
+```
+
+- `"use client"` のコンポーネントから呼ぶ（AI の鍵はサーバー側だけで使う。`src/lib/ai/gemini.ts` は画面から import しない。import すると build エラーになる）
+- **Error は投げない**。失敗も戻り値で返す
+- 同じ日・同じデータなら、サーバーに保存したアドバイスを使い回す（AI を呼ばないので速い）。支出や予定が変わったときだけ作り直す
+- AI での作り直しは1人1日10回まで（失敗した回も数える）。使い切ったら、決まった文になる
+- AI が使えないとき（鍵が無い・失敗・時間切れ・回数の上限）は、決まった文（例：「金曜にサークル飲み会（4,000円）があるので、木曜までは1日1,200円以内がおすすめです。」）を返す
+
+戻り値 `AdviceResult`：
+
+| 項目 | 意味 |
+|---|---|
+| `advice` | アドバイスの文。取得そのものに失敗したとき（ログインしていないなど）だけ `null` |
+| `source` | `"ai"`＝AIで作った、`"fallback"`＝決まった文。取得に失敗したときは `null` |
+| `reason` | 決まった文になった理由：`"no-key"`（鍵が無い）、`"limit"`（今日の10回を使い切った）、`"timeout"`（10秒以内に答えなかった）、`"error"`（そのほかの失敗） |
+| `cached` | 今日作ったアドバイスを使い回したか |
+| `remainingToday` | 今日あと何回 AI で作り直せるか |
+| `error` / `needsRelogin` | 取得そのものに失敗したときのメッセージ／再ログインが必要か |
+
+```tsx
+const [advice, setAdvice] = useState<string | null>(null);
+useEffect(() => {
+  getAdvice().then((r) => setAdvice(r.advice)); // Error は投げない
+}, []);
+
+{advice && <p>💡 {advice}</p>}
+```
+
+- 支出を入れたあとなどに呼び直すと、データが変わっていれば新しいアドバイスになる
+- AI で作ったか決まった文かで見た目を変えたいときは、`source` を見る
+- AI に何を聞くか（プロンプト）は計算担当の `src/lib/ai/prompts.ts`
+
 ## 動作確認ページ
 
 `npm run dev` のあと、ログインして http://localhost:3000/dev/data-check を開き、「すべて試す」を押すと各関数を順に試せます（本番では開けません）。
