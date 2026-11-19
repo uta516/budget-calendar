@@ -23,6 +23,8 @@ import {
   saveGoal,
   saveSettings,
   syncGoogleCalendar,
+  autoSyncCalendar,
+  type AutoSyncResult,
   updateCategory,
   updateEvent,
   updateFixedCost,
@@ -31,6 +33,27 @@ import {
   type EventKind,
   type SyncResult,
 } from "@/lib/supabase";
+import {
+  getBudgetSummary,
+  getHomeSummary,
+  type BudgetSummary,
+  type HomeSummary,
+} from "@/lib/summary";
+
+import { clearDemoData, seedDemoData } from "./seed";
+import { getAdvice, type AdviceResult } from "@/lib/ai/advice";
+
+const ADVICE_REASON: Record<string, string> = {
+  "no-key": "サーバーに GEMINI_API_KEY が無い",
+  limit: "今日の作り直しの回数（10回）を使い切った",
+  timeout: "AI が10秒以内に答えなかった",
+  error: "AI の失敗・答えの形がおかしい など（ターミナルの [ai-advice] を見る）",
+};
+
+const yen = (n: number) => `${n.toLocaleString()}円`;
+
+const DEMO_WARNING =
+  "自分のアカウントの収入・固定費・支出・手入力の予定・目標がすべて消えます（カテゴリ・設定・Googleから同期した予定は残ります）。";
 
 type Result = { ok: boolean; label: string; detail: string };
 
@@ -56,6 +79,84 @@ export default function DataCheck() {
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
+
+  const [home, setHome] = useState<HomeSummary | null>(null);
+  const [budget, setBudget] = useState<BudgetSummary | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+
+  async function loadSummary(kind: "home" | "budget") {
+    setSummaryLoading(true);
+    setSummaryError(null);
+    try {
+      if (kind === "home") setHome(await getHomeSummary());
+      else setBudget(await getBudgetSummary());
+    } catch (e) {
+      setSummaryError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSummaryLoading(false);
+    }
+  }
+
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoMessage, setDemoMessage] = useState<string | null>(null);
+
+  async function seedDemo() {
+    if (!window.confirm(`見本データを入れます。\n${DEMO_WARNING}\nよろしいですか？`)) return;
+    setDemoBusy(true);
+    setDemoMessage(null);
+    try {
+      const r = await seedDemoData();
+      setDemoMessage(
+        `✅ 入れました：収入${r.incomes}件・固定費${r.fixedCosts}件・目標1件・支出${r.expenses}件（合計${yen(r.expenseTotal)}）・予定${r.events}件` +
+          (r.eventsSkipped ? "（今日が月末なので、予定は入れていません）" : ""),
+      );
+      setBudget(null);
+      await loadSummary("home");
+    } catch (e) {
+      setDemoMessage(`❌ ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
+  async function clearDemo() {
+    if (!window.confirm(`見本データを消します。\n${DEMO_WARNING}\nよろしいですか？`)) return;
+    setDemoBusy(true);
+    setDemoMessage(null);
+    try {
+      await clearDemoData();
+      setDemoMessage("✅ 消しました（カテゴリ・設定・Googleから同期した予定は残っています）");
+      setHome(null);
+      setBudget(null);
+    } catch (e) {
+      setDemoMessage(`❌ ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
+  const [autoSyncing, setAutoSyncing] = useState(false);
+  const [autoResult, setAutoResult] = useState<AutoSyncResult | null>(null);
+
+  const [adviceLoading, setAdviceLoading] = useState(false);
+  const [advice, setAdvice] = useState<AdviceResult | null>(null);
+
+  async function tryAdvice() {
+    setAdviceLoading(true);
+    setAdvice(null);
+    // getAdvice は Error を投げないので try/catch は不要
+    setAdvice(await getAdvice());
+    setAdviceLoading(false);
+  }
+
+  async function tryAutoSync() {
+    setAutoSyncing(true);
+    setAutoResult(null);
+    // autoSyncCalendar は Error を投げないので try/catch は不要
+    setAutoResult(await autoSyncCalendar());
+    setAutoSyncing(false);
+  }
 
   async function syncNow() {
     setSyncing(true);
@@ -227,6 +328,148 @@ export default function DataCheck() {
 
       <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
 
+      <h2 className="text-lg font-semibold">見本データ（デモ用）</h2>
+      <p className="text-sm text-red-600">⚠ {DEMO_WARNING}</p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={seedDemo}
+          disabled={demoBusy}
+          className="rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+        >
+          見本データを入れる
+        </button>
+        <button
+          type="button"
+          onClick={clearDemo}
+          disabled={demoBusy}
+          className="rounded-full border border-black/[.08] px-5 py-2 disabled:opacity-50 dark:border-white/[.145]"
+        >
+          見本データを消す
+        </button>
+      </div>
+      {demoBusy && <p className="text-sm">処理中…</p>}
+      {demoMessage && <p className="text-sm">{demoMessage}</p>}
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
+      <h2 className="text-lg font-semibold">まとめの関数（src/lib/summary.ts）</h2>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => loadSummary("home")}
+          disabled={summaryLoading}
+          className="rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+        >
+          ホームのまとめ
+        </button>
+        <button
+          type="button"
+          onClick={() => loadSummary("budget")}
+          disabled={summaryLoading}
+          className="rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+        >
+          予算のまとめ
+        </button>
+      </div>
+      {summaryError && <p className="text-sm text-red-600">❌ {summaryError}</p>}
+
+      {home && (
+        <section className="flex flex-col gap-2 text-sm">
+          <h3 className="font-semibold">getHomeSummary()（今日 {home.today}）</h3>
+          <ul>
+            <li>今月自由に使えるお金：{yen(home.freeMoney)}</li>
+            <li>今月あと使えるお金：{yen(home.monthLeft)}</li>
+            <li>今週の予算：{yen(home.weekBudget)}・今週使った額：{yen(home.weekSpent)}・今週あと：{yen(home.weekLeft)}</li>
+            <li>今日の目安：{yen(home.todayGuide)}</li>
+            <li>
+              月末までに予定で使う見込み：{yen(home.plannedUntilMonthEnd.amount)}（{home.plannedUntilMonthEnd.count}件）
+            </li>
+            <li>普段使いに回せるお金：{yen(home.dailyMoney)}</li>
+          </ul>
+          <table className="w-full text-left">
+            <thead>
+              <tr>
+                <th>日付</th><th>目安</th><th>使った額</th><th>予定</th>
+              </tr>
+            </thead>
+            <tbody>
+              {home.days.map((d) => (
+                <tr key={d.date} className={d.isToday ? "font-semibold" : d.inMonth ? "" : "text-zinc-400"}>
+                  <td>{d.date.slice(5)}({d.weekday}){d.isToday ? " 今日" : ""}</td>
+                  <td>{d.guide === null ? "−" : yen(d.guide)}</td>
+                  <td>{yen(d.spent)}</td>
+                  <td>{d.eventCount}件・{yen(d.plannedAmount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p>これからの予定：</p>
+          <ul>
+            {home.upcomingEvents.length === 0 && <li>なし</li>}
+            {home.upcomingEvents.map((e) => (
+              <li key={e.id}>
+                {e.date}　{e.title}（{e.kind}・{yen(e.estimatedAmount)}）
+              </li>
+            ))}
+          </ul>
+          <details>
+            <summary>戻り値（JSON）</summary>
+            <pre className="overflow-x-auto text-xs">{JSON.stringify(home, null, 2)}</pre>
+          </details>
+        </section>
+      )}
+
+      {budget && (
+        <section className="flex flex-col gap-2 text-sm">
+          <h3 className="font-semibold">getBudgetSummary()（{budget.month}）</h3>
+          <ul>
+            <li>今月の収入合計：{yen(budget.incomeTotal)}</li>
+            <li>今月あと使えるお金：{yen(budget.monthLeft)}</li>
+            <li>カテゴリなしの支出：{yen(budget.uncategorizedSpent)}</li>
+            <li>
+              カテゴリなしの予定：{yen(budget.uncategorizedPlanned)}
+              {budget.uncategorizedPlannedEvents.length > 0 &&
+                `（${budget.uncategorizedPlannedEvents.map((e) => e.title).join("・")}）`}
+            </li>
+          </ul>
+          <table className="w-full text-left">
+            <thead>
+              <tr>
+                <th>カテゴリ</th><th>予算</th><th>使った額</th><th>予定</th><th>残り</th>
+              </tr>
+            </thead>
+            <tbody>
+              {budget.categories.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.name}</td>
+                  <td>{yen(c.budget)}</td>
+                  <td>{yen(c.spent)}</td>
+                  <td>
+                    {yen(c.planned)}
+                    {c.plannedEvents.length > 0 &&
+                      `（${c.plannedEvents.map((e) => e.title).join("・")}）`}
+                  </td>
+                  <td className={c.left < 0 ? "text-red-600" : ""}>{yen(c.left)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p>
+            目標：
+            {budget.goal
+              ? `${budget.goal.name}　目標 ${yen(budget.goal.targetAmount)}・たまった ${yen(budget.goal.savedAmount)}・あと ${yen(budget.goal.remaining)}・月に ${yen(budget.goal.perMonth)}`
+              : "なし"}
+          </p>
+          <details>
+            <summary>戻り値（JSON）</summary>
+            <pre className="overflow-x-auto text-xs">{JSON.stringify(budget, null, 2)}</pre>
+          </details>
+        </section>
+      )}
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
       <h2 className="text-lg font-semibold">Googleカレンダーの同期（{thisMonth()}）</h2>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         Googleカレンダーの今月の予定を、アプリの予定に同期します。新しい予定は種類 other・予想金額 0円で入ります。
@@ -258,6 +501,87 @@ export default function DataCheck() {
             ))}
           </ul>
         </>
+      )}
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
+      <h2 className="text-lg font-semibold">先読みアドバイス（getAdvice）</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        ホームのまとめをもとに、AI（Gemini）でアドバイスを作ります。同じ日・同じデータなら使い回し、
+        支出や予定が変わったときだけ作り直します（1日10回まで。失敗も数える）。AI が使えないときは決まった文になります。
+      </p>
+      <button
+        type="button"
+        onClick={tryAdvice}
+        disabled={adviceLoading}
+        className="self-start rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+      >
+        {adviceLoading ? "作成中…" : "先読みアドバイスを試す"}
+      </button>
+      {advice && (
+        <div className="flex flex-col gap-1 text-sm">
+          {advice.advice ? (
+            <p className="rounded-lg border border-black/[.08] p-3 text-base dark:border-white/[.145]">
+              💡 {advice.advice}
+            </p>
+          ) : (
+            <p className="font-medium text-red-600">
+              ❌ {advice.error}
+              {advice.needsRelogin ? "（再ログインが必要）" : ""}
+            </p>
+          )}
+          {advice.source && (
+            <p>
+              作り方：
+              {advice.source === "ai"
+                ? advice.cached
+                  ? "🤖 AI（今日作ったものを使い回し）"
+                  : "🤖 AI（今作った）"
+                : `📝 決まった文（理由：${ADVICE_REASON[advice.reason ?? "error"] ?? advice.reason}）`}
+            </p>
+          )}
+          {advice.remainingToday !== null && <p>今日あと {advice.remainingToday} 回作り直せます</p>}
+        </div>
+      )}
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
+      <h2 className="text-lg font-semibold">自動同期（autoSyncCalendar）</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        前の自動同期から30分以上たっていれば、今月と来月を同期します（30分の判定はサーバー側）。
+        30分たっていなければ何もしません。手動の「Googleカレンダーを同期」では、最後に同期した時刻は変わりません。
+      </p>
+      <button
+        type="button"
+        onClick={tryAutoSync}
+        disabled={autoSyncing}
+        className="self-start rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+      >
+        {autoSyncing ? "確認中…" : "自動同期を試す"}
+      </button>
+      {autoResult && (
+        <div className="flex flex-col gap-1 text-sm">
+          {autoResult.synced ? (
+            <p className="font-medium">
+              ✅ 同期しました：追加 {autoResult.added}件・更新 {autoResult.updated}件・削除 {autoResult.deleted}件
+            </p>
+          ) : autoResult.reason === "recent" ? (
+            <p className="font-medium">⏸ 前の同期から30分たっていないので、同期しませんでした</p>
+          ) : (
+            <p className="font-medium text-red-600">
+              ❌ {autoResult.error}
+              {autoResult.needsRelogin ? "（再ログインが必要）" : ""}
+            </p>
+          )}
+          <p>
+            最後に同期した時刻（last_synced_at）：
+            {autoResult.lastSyncedAt
+              ? new Date(autoResult.lastSyncedAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
+              : autoResult.reason === "error"
+                ? "取得できませんでした"
+                : "まだ同期していない"}
+          </p>
+        </div>
       )}
     </main>
   );

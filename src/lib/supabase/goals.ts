@@ -4,6 +4,7 @@ import {
   assertYen,
   fail,
   getSupabase,
+  type DataClient,
   getUserId,
   requireName,
 } from "./helpers";
@@ -21,8 +22,8 @@ export type GoalInput = {
 };
 
 /** 自分の目標。まだ無ければ null */
-export async function getGoal(): Promise<Goal | null> {
-  const { data, error } = await getSupabase()
+export async function getGoal(client?: DataClient): Promise<Goal | null> {
+  const { data, error } = await getSupabase(client)
     .from("goals")
     .select("*")
     .maybeSingle();

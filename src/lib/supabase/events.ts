@@ -4,6 +4,7 @@ import {
   assertYen,
   fail,
   getSupabase,
+  type DataClient,
   getUserId,
   requireName,
 } from "./helpers";
@@ -74,9 +75,9 @@ function toRow({ title, kind, startsAt, endsAt, estimatedAmount }: EventInput) {
 }
 
 /** その月（日本時間）に始まる予定の一覧（開始日時の早い順） */
-export async function getEvents(month: string): Promise<Event[]> {
+export async function getEvents(month: string, client?: DataClient): Promise<Event[]> {
   const { from, to } = monthTimeRange(month);
-  const { data, error } = await getSupabase()
+  const { data, error } = await getSupabase(client)
     .from("events")
     .select("*")
     .gte("starts_at", from)
@@ -149,4 +150,58 @@ export async function syncGoogleCalendar(month: string): Promise<SyncResult> {
     updated: body.updated ?? 0,
     deleted: body.deleted ?? 0,
   };
+}
+
+export type AutoSyncResult = {
+  /** 今回、同期したか */
+  synced: boolean;
+  /** 同期しなかった理由。"recent"＝前の同期から30分たっていない、"error"＝失敗した */
+  reason?: "recent" | "error";
+  added: number;
+  updated: number;
+  deleted: number;
+  /** 最後に自動同期した時刻（ISO 形式）。一度も同期していなければ null */
+  lastSyncedAt: string | null;
+  /** 失敗したときの日本語のメッセージ */
+  error?: string;
+  /** 再ログインが必要なとき true（ログアウトしてログインし直してもらう） */
+  needsRelogin?: boolean;
+};
+
+/**
+ * アプリを開いたときに呼ぶ。前の自動同期から30分以上たっていれば、今月と来月の予定を同期する。
+ * 30分の判定はサーバー側で行う。画面を開くたびに呼ぶ想定なので、失敗しても Error は投げず、戻り値で返す。
+ */
+export async function autoSyncCalendar(): Promise<AutoSyncResult> {
+  const empty = { added: 0, updated: 0, deleted: 0, lastSyncedAt: null };
+  try {
+    const res = await fetch("/api/calendar/auto-sync", { method: "POST" });
+    const body = (await res.json().catch(() => null)) as
+      | (Partial<AutoSyncResult> & { error?: string; needsRelogin?: boolean })
+      | null;
+    if (!res.ok || !body) {
+      return {
+        ...empty,
+        synced: false,
+        reason: "error",
+        error: body?.error ?? "Googleカレンダーの自動同期に失敗しました",
+        needsRelogin: body?.needsRelogin ?? res.status === 401,
+      };
+    }
+    return {
+      synced: body.synced ?? false,
+      reason: body.reason,
+      added: body.added ?? 0,
+      updated: body.updated ?? 0,
+      deleted: body.deleted ?? 0,
+      lastSyncedAt: body.lastSyncedAt ?? null,
+    };
+  } catch {
+    return {
+      ...empty,
+      synced: false,
+      reason: "error",
+      error: "Googleカレンダーの自動同期に失敗しました（通信エラー）",
+    };
+  }
 }

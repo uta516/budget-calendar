@@ -4,6 +4,7 @@ import {
   assertYen,
   fail,
   getSupabase,
+  type DataClient,
   getUserId,
   requireName,
 } from "./helpers";
@@ -11,8 +12,8 @@ import {
 export type Income = Tables<"incomes">;
 
 /** 収入の一覧（古い順） */
-export async function getIncomes(): Promise<Income[]> {
-  const { data, error } = await getSupabase()
+export async function getIncomes(client?: DataClient): Promise<Income[]> {
+  const { data, error } = await getSupabase(client)
     .from("incomes")
     .select("*")
     .order("id");
