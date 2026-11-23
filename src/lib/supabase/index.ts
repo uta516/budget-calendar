@@ -8,4 +8,5 @@ export * from "./expenses";
 export * from "./goals";
 export * from "./settings";
 export * from "./events";
+export * from "./eventActuals";
 export type { DataClient } from "./helpers";

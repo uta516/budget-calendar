@@ -33,6 +33,20 @@ export function fail(message: string, cause?: unknown): never {
   throw new Error(message, { cause });
 }
 
+/**
+ * 予定が自分のものかを確かめる（RLS で自分の予定しか見えないので、見つからなければ他人の予定か、存在しない）。
+ * 支出に event_id を付ける前に使う（外部キーの確認は RLS を通らないので、他人の予定の id でも付けられてしまうため）
+ */
+export async function assertOwnEvent(eventId: number, client?: DataClient): Promise<void> {
+  const { data, error } = await getSupabase(client)
+    .from("events")
+    .select("id")
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error) fail("予定の読み込みに失敗しました", error);
+  if (!data) throw new Error("結びつける予定が見つかりませんでした");
+}
+
 /** update / delete の結果が0件なら Error を投げる */
 export function assertFound<T>(rows: T[] | null): T {
   if (!rows || rows.length === 0) {
