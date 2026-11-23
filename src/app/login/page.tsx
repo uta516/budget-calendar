@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import LoginHero from "@/components/login/LoginHero";
+import GoogleLoginButton from "@/components/login/GoogleLoginButton";
+import LoginError from "@/components/login/LoginError";
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -27,16 +30,19 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
-      <button
-        type="button"
-        onClick={signInWithGoogle}
-        disabled={loading}
-        className="rounded-full bg-foreground px-6 py-3 font-medium text-background transition-opacity hover:opacity-80 disabled:opacity-50"
-      >
-        {loading ? "移動中…" : "Googleでログイン"}
-      </button>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+    <main className="flex flex-1 flex-col bg-gradient-to-b from-teal-50 to-zinc-100">
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-between px-6 pb-10 pt-24">
+        <LoginHero />
+        <div className="mt-16 space-y-3">
+          <GoogleLoginButton loading={loading} onClick={signInWithGoogle} />
+          <LoginError message={error} />
+          <p className="text-center text-xs leading-relaxed text-zinc-500">
+            Googleカレンダーの予定を読み込むために、
+            <br />
+            カレンダーへのアクセスを許可してください
+          </p>
+        </div>
+      </div>
     </main>
   );
 }
