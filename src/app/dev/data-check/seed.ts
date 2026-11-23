@@ -172,6 +172,7 @@ export async function seedDemoData(now: Date = new Date()): Promise<SeedResult> 
         startsAt: `${date}T${e.start}:00+09:00`,
         endsAt: e.end ? `${date}T${e.end}:00+09:00` : null,
         estimatedAmount: e.amount,
+        addToGoogle: false, // 見本データは本物の Googleカレンダーに入れない
       });
     }
   }

@@ -75,9 +75,15 @@ async function callCalendar(
   url: string,
   accessToken: string,
   signal?: AbortSignal,
+  init?: { method: "POST" | "PATCH" | "DELETE"; body?: unknown },
 ): Promise<Response> {
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    method: init?.method ?? "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
+    body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
     cache: "no-store",
     signal,
   });
@@ -172,4 +178,100 @@ export function timesChanged(current: EventTimes, next: EventTimes): boolean {
     !sameTime(current.starts_at, next.starts_at) ||
     !sameTime(current.ends_at, next.ends_at)
   );
+}
+
+// ───────── Google に書き込む（予定の作成・変更・削除） ─────────
+// 送るのはタイトルと日時だけ。予想金額と種類は送らない（お金の情報を Googleカレンダーに出さないため）
+
+/** Google に書き込む予定（終了日時は必ず入れる。無い予定は呼ぶ側で開始の1時間後にする） */
+export type GoogleEventWrite = { title: string; startsAt: string; endsAt: string };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const jstFormat = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Tokyo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/** ISO → 日本時間の { date: "YYYY-MM-DD", time: "HH:MM" } */
+function jstParts(iso: string): { date: string; time: string } {
+  const p = Object.fromEntries(jstFormat.formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
+}
+
+/**
+ * Google の start / end の形にする。
+ * 日本時間の 0:00 に始まり、ちょうど何日か後の 0:00 に終わる予定は「終日」として送る
+ * （同期で終日の予定をこの形で保存しているので、時刻つきの予定に変わってしまわないように）
+ */
+function toGoogleTimes({ startsAt, endsAt }: GoogleEventWrite) {
+  const start = jstParts(startsAt);
+  const end = jstParts(endsAt);
+  const length = Date.parse(endsAt) - Date.parse(startsAt);
+  if (start.time === "00:00" && end.time === "00:00" && length > 0 && length % DAY_MS === 0) {
+    return { start: { date: start.date }, end: { date: end.date } };
+  }
+  return {
+    start: { dateTime: startsAt, timeZone: "Asia/Tokyo" },
+    end: { dateTime: endsAt, timeZone: "Asia/Tokyo" },
+  };
+}
+
+/** 主カレンダーに予定を作り、Google の予定の ID を返す */
+export async function insertEvent(
+  accessToken: string,
+  event: GoogleEventWrite,
+  signal?: AbortSignal,
+): Promise<string> {
+  const res = await callCalendar(EVENTS_URL, accessToken, signal, {
+    method: "POST",
+    body: { summary: event.title, ...toGoogleTimes(event) },
+  });
+  const body = (await res.json().catch(() => null)) as { id?: string } | null;
+  if (!res.ok || !body?.id) {
+    throw new GoogleApiError(`予定の作成に失敗しました（${res.status}）`);
+  }
+  return body.id;
+}
+
+/**
+ * 予定のタイトルと日時を変える（説明や場所など、ほかの項目はそのまま）。
+ * Google ですでに消えていた（404 / 410）ときは false を返す
+ */
+export async function patchEvent(
+  accessToken: string,
+  eventId: string,
+  event: GoogleEventWrite,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const res = await callCalendar(`${EVENTS_URL}/${encodeURIComponent(eventId)}`, accessToken, signal, {
+    method: "PATCH",
+    body: { summary: event.title, ...toGoogleTimes(event) },
+  });
+  if (res.status === 404 || res.status === 410) return false;
+  if (!res.ok) {
+    throw new GoogleApiError(`予定の変更に失敗しました（${res.status}）`);
+  }
+  return true;
+}
+
+/** 予定を消す。Google ですでに消えていた（404 / 410）ときは false を返す（エラーにしない） */
+export async function deleteEvent(
+  accessToken: string,
+  eventId: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const res = await callCalendar(`${EVENTS_URL}/${encodeURIComponent(eventId)}`, accessToken, signal, {
+    method: "DELETE",
+  });
+  if (res.status === 404 || res.status === 410) return false;
+  if (!res.ok) {
+    throw new GoogleApiError(`予定の削除に失敗しました（${res.status}）`);
+  }
+  return true;
 }

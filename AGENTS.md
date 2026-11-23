@@ -50,7 +50,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 支出：getExpenses("2026-11")、addExpense({ amount, categoryId, eventId?, spentOn? })、deleteExpense(id)
 - 目標：getGoal()（無ければ null）、saveGoal({ name, targetAmount, months, savedAmount })（1人1つ）
 - 設定：getSettings()（無ければ初期値）、saveSettings({ hourlyWage, nightRate, holidayBonus })
-- 予定：getEvents("2026-11")、addEvent({ title, kind, startsAt, endsAt?, estimatedAmount })、updateEvent(id, { 同じ形 })、deleteEvent(id)、syncGoogleCalendar("2026-11")（Googleカレンダーのその月の予定を同期し、{ added, updated, deleted } を返す）、autoSyncCalendar()（ホーム・カレンダーを開いたときに呼ぶ。前の自動同期から30分以上たっていれば今月と来月を同期する。Error は投げず、結果を戻り値で返す）
+- 予定：getEvents("2026-11")、addEvent({ title, kind, startsAt, endsAt?, estimatedAmount, addToGoogle? })（addToGoogle の省略時は true で Googleカレンダーにも追加。Google に追加できなくても Error は投げず、戻り値の google.added で分かる）、updateEvent(id, { title, kind, startsAt, endsAt?, estimatedAmount })・deleteEvent(id)（Google とつながっている予定は Google も変更・削除する。Google が失敗したらアプリも変えずに Error）、syncGoogleCalendar("2026-11")（Googleカレンダーのその月の予定を同期し、{ added, updated, deleted } を返す）、autoSyncCalendar()（ホーム・カレンダーを開いたときに呼ぶ。前の自動同期から30分以上たっていれば今月と来月を同期する。Error は投げず、結果を戻り値で返す）
 - まとめ（src/lib/summary.ts）：getHomeSummary(today?)（ホーム画面の数字）、getBudgetSummary(month?)（予算画面の数字）。`import { ... } from "@/lib/summary"`
 - AI（src/lib/ai/advice.ts）：getAdvice()（先読みアドバイス1〜2文。Error は投げず、AIで作ったか決まった文かも返す）。`import { getAdvice } from "@/lib/ai/advice"`。src/lib/ai/gemini.ts はサーバー専用なので画面から import しない
 - 失敗したときは日本語のメッセージの Error を投げる

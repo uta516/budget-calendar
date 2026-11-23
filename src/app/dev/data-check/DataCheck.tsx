@@ -150,6 +150,92 @@ export default function DataCheck() {
     setAdviceLoading(false);
   }
 
+  // Googleカレンダーへの書き込み（作る → 変更 → 削除）
+  const [gwRunning, setGwRunning] = useState(false);
+  const [gwResults, setGwResults] = useState<Result[]>([]);
+  const [gwKeep, setGwKeep] = useState(false);
+  const [gwKeptId, setGwKeptId] = useState<number | null>(null);
+
+  async function gwStep<T>(label: string, fn: () => Promise<T>, show: (v: T) => string) {
+    try {
+      const value = await fn();
+      setGwResults((prev) => [...prev, { ok: true, label, detail: show(value) }]);
+      return value;
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      setGwResults((prev) => [...prev, { ok: false, label, detail }]);
+      return undefined;
+    }
+  }
+
+  async function tryGoogleWrite() {
+    if (
+      !window.confirm(
+        "本物の Googleカレンダーに「アプリからのテスト予定」を作り、変更します。" +
+          (gwKeep ? "（最後に削除しません）" : "最後に削除します。") +
+          "\nよろしいですか？",
+      )
+    )
+      return;
+    setGwRunning(true);
+    setGwResults([]);
+    setGwKeptId(null);
+    // 明日（日本時間）のお昼
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString("sv-SE", {
+      timeZone: "Asia/Tokyo",
+    });
+    const linked = (e: { google_event_id: string | null }) =>
+      e.google_event_id ? `google_event_id：${e.google_event_id}` : "google_event_id：なし（アプリだけ）";
+
+    const created = await gwStep(
+      "addEvent（Googleにも追加）",
+      () =>
+        addEvent({
+          title: "アプリからのテスト予定",
+          kind: "meal",
+          startsAt: `${tomorrow}T12:00:00+09:00`, // 終了日時なし → 開始の1時間後になる
+          estimatedAmount: 1500,
+        }),
+      (e) =>
+        e.google.added
+          ? `✅ Googleに追加できた（${linked(e)}、終了：${formatDateTime(e.ends_at ?? e.starts_at)}）`
+          : `⚠ Googleには追加できず、アプリにだけ保存した：${e.google.message}（${linked(e)}）`,
+    );
+    if (created) {
+      const updated = await gwStep(
+        "updateEvent（Googleも変更）",
+        () =>
+          updateEvent(created.id, {
+            title: "アプリからのテスト予定（変更）",
+            kind: "meal",
+            startsAt: `${tomorrow}T13:00:00+09:00`,
+            endsAt: `${tomorrow}T14:30:00+09:00`,
+            estimatedAmount: 2000,
+          }),
+        (e) => `タイトル「${e.title}」、${formatDateTime(e.starts_at)}〜（${linked(e)}）`,
+      );
+      if (updated && gwKeep) {
+        setGwKeptId(created.id);
+        setGwResults((prev) => [
+          ...prev,
+          { ok: true, label: "deleteEvent", detail: "削除せずに残しました。Googleカレンダーで確かめたあと、下のボタンで消してください" },
+        ]);
+      } else {
+        await gwStep("deleteEvent（Googleからも削除）", () => deleteEvent(created.id), () => "削除しました");
+      }
+    }
+    setGwRunning(false);
+  }
+
+  async function deleteKeptGoogleEvent() {
+    if (gwKeptId === null) return;
+    if (!window.confirm("残したテスト予定を削除します。Googleカレンダーからも消えます。よろしいですか？")) return;
+    setGwRunning(true);
+    const done = await gwStep("deleteEvent（残したテスト予定）", () => deleteEvent(gwKeptId), () => "削除しました");
+    if (done !== undefined) setGwKeptId(null);
+    setGwRunning(false);
+  }
+
   async function tryAutoSync() {
     setAutoSyncing(true);
     setAutoResult(null);
@@ -239,7 +325,8 @@ export default function DataCheck() {
     const month = thisMonth();
     const startsAt = `${month}-15T19:00:00+09:00`;
     const event = await step("addEvent", () =>
-      addEvent({ title: "テスト予定", kind: "drink", startsAt, estimatedAmount: 3000 }),
+      // 「すべて試す」では本物の Googleカレンダーに入れない（Google は下の専用ボタンで試す）
+      addEvent({ title: "テスト予定", kind: "drink", startsAt, estimatedAmount: 3000, addToGoogle: false }),
     );
     if (event) {
       await step("updateEvent", () =>
@@ -260,6 +347,7 @@ export default function DataCheck() {
         kind: "party" as EventKind,
         startsAt,
         estimatedAmount: 0,
+        addToGoogle: false,
       });
       push({ ok: false, label: "予定の種類チェック", detail: "決まっていない種類が保存できてしまいました" });
     } catch (e) {
@@ -543,6 +631,46 @@ export default function DataCheck() {
           {advice.remainingToday !== null && <p>今日あと {advice.remainingToday} 回作り直せます</p>}
         </div>
       )}
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
+      <h2 className="text-lg font-semibold">Googleカレンダーへの書き込み</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        明日のお昼に「アプリからのテスト予定」を Googleにも追加して作り、タイトルと時間を変更し、最後に削除します。
+        Google に送るのはタイトルと日時だけです（金額と種類は送りません）。
+      </p>
+      <p className="text-sm text-red-600">⚠ 本物の Googleカレンダーに書き込みます。</p>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={gwKeep} onChange={(e) => setGwKeep(e.target.checked)} />
+        最後に削除しない（途中の様子を Googleカレンダーで確かめるため）
+      </label>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={tryGoogleWrite}
+          disabled={gwRunning}
+          className="rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+        >
+          {gwRunning ? "実行中…" : "Googleにも追加して作る → 変更 → 削除"}
+        </button>
+        {gwKeptId !== null && (
+          <button
+            type="button"
+            onClick={deleteKeptGoogleEvent}
+            disabled={gwRunning}
+            className="rounded-full border border-black/[.08] px-5 py-2 disabled:opacity-50 dark:border-white/[.145]"
+          >
+            残したテスト予定を削除
+          </button>
+        )}
+      </div>
+      <ul className="flex flex-col gap-2 text-sm">
+        {gwResults.map((r, i) => (
+          <li key={i} className="break-all">
+            {r.ok ? "✅" : "❌"} <span className="font-mono font-semibold">{r.label}</span>：{r.detail}
+          </li>
+        ))}
+      </ul>
 
       <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
 

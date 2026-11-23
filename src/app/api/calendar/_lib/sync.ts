@@ -45,11 +45,15 @@ const IN_CHUNK = 100;
 
 type ExistingEvent = EventTimes & { id: number; google_event_id: string };
 
-/** 使える access_token を返す（期限が近ければ refresh_token で更新し、google_tokens に保存する） */
-async function getAccessToken(
+/**
+ * 使える access_token を返す（期限が近ければ refresh_token で更新し、google_tokens に保存する）。
+ * 同期と、Google への書き込み（/api/calendar/events）の両方で使う。
+ * 失敗したら CalendarSyncError（再ログインが必要なら status 401）を投げる
+ */
+export async function getAccessToken(
   supabase: Supabase,
   userId: string,
-  signal: AbortSignal,
+  signal: AbortSignal = new AbortController().signal,
 ): Promise<string> {
   const { data: token, error: tokenError } = await supabase
     .from("google_tokens")
@@ -251,18 +255,26 @@ export async function syncCalendarMonths(
     if (signal.aborted) {
       throw new CalendarSyncAbortedError("同期を打ち切りました");
     }
-    if (e instanceof CalendarSyncError) throw e;
-    if (e instanceof GoogleReauthError) {
-      console.error("Calendar API の認証エラー:", e.message);
-      throw new CalendarSyncError(401, RELOGIN_MESSAGE);
-    }
-    if (e instanceof GoogleApiError) {
-      console.error("Calendar API のエラー:", e.message);
-      throw new CalendarSyncError(502, "Googleカレンダーの読み込みに失敗しました");
-    }
-    console.error("予定の同期に失敗:", e);
-    throw new CalendarSyncError(500, "予定の保存に失敗しました");
+    throw toCalendarSyncError(e, "Googleカレンダーの読み込みに失敗しました");
   }
+}
+
+/**
+ * Google とのやりとりで起きたエラーを、API でそのまま返せる CalendarSyncError に直す。
+ * googleMessage は Google 側の失敗（502）のときの日本語のメッセージ
+ */
+export function toCalendarSyncError(e: unknown, googleMessage: string): CalendarSyncError {
+  if (e instanceof CalendarSyncError) return e;
+  if (e instanceof GoogleReauthError) {
+    console.error("Calendar API の認証エラー:", e.message);
+    return new CalendarSyncError(401, RELOGIN_MESSAGE);
+  }
+  if (e instanceof GoogleApiError) {
+    console.error("Calendar API のエラー:", e.message);
+    return new CalendarSyncError(502, googleMessage);
+  }
+  console.error("予定の同期に失敗:", e);
+  return new CalendarSyncError(500, "予定の保存に失敗しました");
 }
 
 /** 自動同期した時刻を保存し、その時刻を返す */

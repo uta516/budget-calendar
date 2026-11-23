@@ -42,19 +42,27 @@ Supabase のデータを読み書きする関数です。中身は `src/lib/supa
 | 設定 | `getSettings()` | `{ hourlyWage, nightRate, holidayBonus }`。まだ無ければ初期値（1100・1.25・0） |
 | | `saveSettings({ hourlyWage, nightRate, holidayBonus })` | 保存した設定 |
 | 予定 | `getEvents(month)` | その月（日本時間）に始まる予定の配列（開始日時の早い順）。`month` は `"2026-11"` の形 |
-| | `addEvent({ title, kind, startsAt, endsAt?, estimatedAmount })` | 追加した予定（手入力の予定） |
-| | `updateEvent(id, { title, kind, startsAt, endsAt?, estimatedAmount })` | 変更した予定 |
-| | `deleteEvent(id)` | なし（その予定に結びついた支出は残り、結びつきだけ外れる） |
+| | `addEvent({ title, kind, startsAt, endsAt?, estimatedAmount, addToGoogle? })` | 追加した予定 ＋ `google: { added, reason?, message? }`。`addToGoogle` を省略したら true で、**Googleカレンダーにも追加する**。Google に追加できなかったときも Error は投げず、アプリにだけ保存する |
+| | `updateEvent(id, { title, kind, startsAt, endsAt?, estimatedAmount })` | 変更した予定。Google とつながっている予定は **Googleカレンダーも変わる** |
+| | `deleteEvent(id)` | なし。Google とつながっている予定は **本物の Googleカレンダーからも消える**（その予定に結びついた支出は残り、結びつきだけ外れる） |
 | | `syncGoogleCalendar(month)` | `{ added, updated, deleted }`。Googleカレンダーのその月の予定をアプリに同期する（手動の同期。「今すぐ同期」ボタンなど） |
 | | `autoSyncCalendar()` | `{ synced, reason?, added, updated, deleted, lastSyncedAt, error?, needsRelogin? }`。前の自動同期から30分以上たっていれば、今月と来月を同期する。**Error を投げない** |
 
-型も import できます：`Income`、`FixedCost`、`Category`、`Expense`、`Goal`、`Settings`、`Event`、`EventKind`、`SyncResult`、`AutoSyncResult`。
+型も import できます：`Income`、`FixedCost`、`Category`、`Expense`、`Goal`、`Settings`、`Event`、`EventKind`、`SyncResult`、`AutoSyncResult`、`NewEventInput`、`AddEventResult`、`GoogleAddResult`。
 
 ### 予定について
 
 - `kind`（種類）は `drink`（飲み会）／`meal`（食事）／`fun`（遊び）／`trip`（旅行）／`shop`（買い物）／`work`（バイト）／`other`（その他）のどれか。それ以外は Error。一覧は `EVENT_KINDS` で import できる
 - `startsAt`・`endsAt` は ISO 形式の文字列（例：`"2026-11-20T19:00:00+09:00"`）。戻り値の `starts_at` は UTC 表記（`...+00:00`）で返ってくるので、表示するときは `new Date(starts_at).toLocaleString("ja-JP")` などで日本時間にする
-- `google_event_id` が入っている予定は Googleカレンダーから読み込んだもの、null は手入力の予定
+- `google_event_id` が入っている予定は Googleカレンダーとつながっている予定（Google から読み込んだもの、またはアプリから Google にも追加したもの）。null はアプリだけの予定
+- **Googleカレンダーへの書き込み**（addEvent・updateEvent・deleteEvent）の決まり
+  - Google に送るのは**タイトルと日時だけ**。予想金額と種類は送らない（お金の情報を Googleカレンダーに出さないため）
+  - 終了日時が無い予定は、開始の1時間後を終了として Google に送る（アプリの `ends_at` にも同じ値が入る）
+  - 終日の予定（日本時間の 0:00 から、何日か後の 0:00 まで）は、Google にも終日の予定として送る
+  - **追加**：Google に追加できなかったとき（連携が切れている、など）も止めずに、アプリにだけ保存する。戻り値の `google.added` が false になり、`google.message`（例：「Googleカレンダーには追加できませんでした（もう一度ログインしてください）」）が入るので、画面に出す。`google.reason` が `"needs-relogin"` ならログインし直しを案内する
+  - **変更・削除**：Google が失敗したら、アプリも変えずに Error を投げる（Google とアプリでずれないように）。Google ですでに消えていた予定は、エラーにせずアプリだけ処理する（変更のときは、その予定はアプリだけの予定になる）
+  - Google から同期した予定も、タイトルと日時を変えられる（Google 側も同じように変わるので、次の同期で元に戻らない）
+  - **削除の前に「Googleカレンダーからも消えます」と確認を出す**（`google_event_id` がある予定は、本物の Googleカレンダーから消えるため）
 - `syncGoogleCalendar` の決まり
   - 新しく入る予定は `kind: "other"`、`estimated_amount: 0`
   - すでにある予定は、タイトルと日時だけ更新する（ユーザーが直した種類と金額は消さない）
@@ -162,6 +170,7 @@ await saveSettings({ ...settings, hourlyWage: 1200 });
 ```ts
 const events = await getEvents("2026-11");
 
+// Googleカレンダーにも追加する（addToGoogle を省略したら true）
 const event = await addEvent({
   title: "サークルの飲み会",
   kind: "drink",
@@ -169,13 +178,25 @@ const event = await addEvent({
   endsAt: "2026-11-20T22:00:00+09:00",
   estimatedAmount: 4000,
 });
+if (!event.google.added && event.google.reason !== "not-requested") {
+  setNotice(event.google.message); // 「Googleカレンダーには追加できませんでした」（予定はアプリに保存できている）
+}
+
+// アプリにだけ追加する
+await addEvent({ title: "家計簿の見直し", kind: "other", startsAt: "2026-11-21T10:00:00+09:00", estimatedAmount: 0, addToGoogle: false });
+
+// 変更（Google とつながっていれば Google も変わる）
 await updateEvent(event.id, {
   title: "サークルの飲み会",
   kind: "drink",
   startsAt: "2026-11-20T19:00:00+09:00",
   estimatedAmount: 3500,
 });
-await deleteEvent(event.id);
+
+// 削除（Google とつながっていれば、本物の Googleカレンダーからも消える）
+if (!event.google_event_id || window.confirm("Googleカレンダーからも消えます。削除しますか？")) {
+  await deleteEvent(event.id);
+}
 
 // 「今すぐ同期」ボタンなどで、指定した月を同期する
 const { added, updated, deleted } = await syncGoogleCalendar("2026-11");
