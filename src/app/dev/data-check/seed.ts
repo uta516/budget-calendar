@@ -23,6 +23,8 @@ export type SeedResult = {
   events: number;
   /** 今日が月末で、今月の「今日より後の日」が無かったため予定を入れなかった */
   eventsSkipped: boolean;
+  /** 今月のすでに過ぎた予定の件数（ランチ会・カラオケ。過ぎた日が無ければ0） */
+  pastEvents: number;
 };
 
 // ───────── 日付（日本時間の "YYYY-MM-DD"） ─────────
@@ -79,9 +81,20 @@ const EARLIER_EXPENSES = [
   { category: "食費", amount: 3200, daysBeforeWeek: 3 },
   { category: "交通費", amount: 1500, daysBeforeWeek: 6 },
   { category: "その他", amount: 2650, daysBeforeWeek: 9 },
-  { category: "食費", amount: 2300, daysBeforeWeek: 12 },
+  // 過ぎた予定「ランチ会」と結びつける（予想 1,500円 → 実際 2,300円）
+  { category: "食費", amount: 2300, daysBeforeWeek: 12, linkTo: "ランチ会" },
 ];
 // 合計 19,000円
+
+/**
+ * 今月のすでに過ぎた予定（予想と実際・記録し忘れの確認用）。
+ * ランチ会：上の食費 2,300円 と同じ日にして、その支出と結びつける
+ * カラオケ：支出を結びつけない（記録し忘れとして出る）。今日の3日前（月初より前なら月初）
+ */
+const PAST_EVENTS: { title: string; kind: EventKind; amount: number; start: string; end: string }[] = [
+  { title: "ランチ会", kind: "meal", amount: 1500, start: "12:00", end: "13:00" },
+  { title: "カラオケ", kind: "fun", amount: 2500, start: "19:00", end: "21:00" },
+];
 
 /** 手入力の予定（今日から何日後か。時刻は日本時間） */
 const EVENTS: {
@@ -153,11 +166,33 @@ export async function seedDemoData(now: Date = new Date()): Promise<SeedResult> 
           : weekStart,
     })),
   ];
+  // 過ぎた予定：今日より前の今月の日にだけ入れる（月の初めで過ぎた日が無ければ入れない）
+  const pastEventIds = new Map<string, number>();
+  const linkedExpense = expenses.find((e) => "linkTo" in e && e.linkTo === "ランチ会");
+  const pastDates: Record<string, string | undefined> = {
+    ランチ会: linkedExpense ? minDate(linkedExpense.date, today) : undefined,
+    カラオケ: maxDate(addDays(today, -3), monthStart),
+  };
+  for (const e of PAST_EVENTS) {
+    const date = pastDates[e.title];
+    if (!date || date >= today) continue;
+    const created = await addEvent({
+      title: e.title,
+      kind: e.kind,
+      startsAt: `${date}T${e.start}:00+09:00`,
+      endsAt: `${date}T${e.end}:00+09:00`,
+      estimatedAmount: e.amount,
+      addToGoogle: false, // 見本データは本物の Googleカレンダーに入れない
+    });
+    pastEventIds.set(e.title, created.id);
+  }
+
   for (const e of expenses) {
     await addExpense({
       amount: e.amount,
       categoryId: findCategoryId(categories, e.category),
       spentOn: minDate(e.date, today),
+      eventId: "linkTo" in e && e.linkTo ? pastEventIds.get(e.linkTo) : undefined,
     });
   }
 
@@ -184,5 +219,6 @@ export async function seedDemoData(now: Date = new Date()): Promise<SeedResult> 
     expenseTotal: expenses.reduce((total, e) => total + e.amount, 0),
     events: eventsSkipped ? 0 : EVENTS.length,
     eventsSkipped,
+    pastEvents: pastEventIds.size,
   };
 }

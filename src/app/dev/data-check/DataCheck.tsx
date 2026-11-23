@@ -42,6 +42,15 @@ import {
 
 import { clearDemoData, seedDemoData } from "./seed";
 import { getAdvice, type AdviceResult } from "@/lib/ai/advice";
+import {
+  getEventActuals,
+  getKindAverages,
+  getMissedEvents,
+  linkExpenseToEvent,
+  type EventActualsResult,
+  type KindAverage,
+  type MissedEvent,
+} from "@/lib/supabase";
 
 const ADVICE_REASON: Record<string, string> = {
   "no-key": "サーバーに GEMINI_API_KEY が無い",
@@ -108,8 +117,9 @@ export default function DataCheck() {
     try {
       const r = await seedDemoData();
       setDemoMessage(
-        `✅ 入れました：収入${r.incomes}件・固定費${r.fixedCosts}件・目標1件・支出${r.expenses}件（合計${yen(r.expenseTotal)}）・予定${r.events}件` +
-          (r.eventsSkipped ? "（今日が月末なので、予定は入れていません）" : ""),
+        `✅ 入れました：収入${r.incomes}件・固定費${r.fixedCosts}件・目標1件・支出${r.expenses}件（合計${yen(r.expenseTotal)}）・予定${r.events}件・過ぎた予定${r.pastEvents}件` +
+          (r.eventsSkipped ? "（今日が月末なので、これからの予定は入れていません）" : "") +
+          (r.pastEvents === 0 ? "（今月の過ぎた日が無いので、過ぎた予定は入れていません）" : ""),
       );
       setBudget(null);
       await loadSummary("home");
@@ -148,6 +158,27 @@ export default function DataCheck() {
     // getAdvice は Error を投げないので try/catch は不要
     setAdvice(await getAdvice());
     setAdviceLoading(false);
+  }
+
+  // 記録し忘れ・予想と実際・種類ごとの平均
+  const [actualsLoading, setActualsLoading] = useState(false);
+  const [actualsError, setActualsError] = useState<string | null>(null);
+  const [missed, setMissed] = useState<MissedEvent[] | null>(null);
+  const [actuals, setActuals] = useState<EventActualsResult | null>(null);
+  const [averages, setAverages] = useState<KindAverage[] | null>(null);
+
+  async function loadActuals(kind: "missed" | "actuals" | "averages") {
+    setActualsLoading(true);
+    setActualsError(null);
+    try {
+      if (kind === "missed") setMissed(await getMissedEvents());
+      else if (kind === "actuals") setActuals(await getEventActuals());
+      else setAverages(await getKindAverages());
+    } catch (e) {
+      setActualsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActualsLoading(false);
+    }
   }
 
   // Googleカレンダーへの書き込み（作る → 変更 → 削除）
@@ -341,6 +372,71 @@ export default function DataCheck() {
     }
     await step(`getEvents("${month}")`, () => getEvents(month), count);
     if (event) await step("deleteEvent", () => deleteEvent(event.id), () => "削除しました");
+
+    // 支出と予定の結びつけ（昨日の予定と支出を作って結びつけ、外して、最後に消す）
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toLocaleDateString("sv-SE", {
+      timeZone: "Asia/Tokyo",
+    });
+    const linkCategoryId = categories?.[0]?.id;
+    const pastEvent = await step(
+      "addEvent（過ぎた予定）",
+      () =>
+        addEvent({
+          title: "テスト予定（過去）",
+          kind: "meal",
+          startsAt: `${yesterday}T12:00:00+09:00`,
+          endsAt: `${yesterday}T13:00:00+09:00`,
+          estimatedAmount: 1000,
+          addToGoogle: false,
+        }),
+      (e) => `id ${e.id}`,
+    );
+    const linkExpense =
+      pastEvent && linkCategoryId !== undefined
+        ? await step(
+            "addExpense（結びつけ用）",
+            () => addExpense({ amount: 1200, categoryId: linkCategoryId, spentOn: yesterday }),
+            (e) => `id ${e.id}`,
+          )
+        : undefined;
+    if (pastEvent && linkExpense) {
+      await step(
+        "linkExpenseToEvent（結びつける）",
+        () => linkExpenseToEvent(linkExpense.id, pastEvent.id),
+        (e) => `event_id ${e.event_id}`,
+      );
+      await step(
+        "getEventActuals（実際に入るか）",
+        () => getEventActuals(yesterday.slice(0, 7)),
+        (r) => {
+          const a = r.events.find((x) => x.eventId === pastEvent.id);
+          if (!a || a.actual !== 1200 || a.diff !== 200) {
+            throw new Error(`実際・差が想定と違います：${JSON.stringify(a)}`);
+          }
+          return `予想 ${yen(a.estimated)}・実際 ${yen(a.actual)}・差 +${yen(a.diff)}`;
+        },
+      );
+      await step(
+        "linkExpenseToEvent（外す）",
+        () => linkExpenseToEvent(linkExpense.id, null),
+        (e) => `event_id ${e.event_id ?? "null"}`,
+      );
+      await step("deleteExpense（結びつけ用）", () => deleteExpense(linkExpense.id), () => "削除しました");
+    }
+    if (pastEvent) {
+      await step("deleteEvent（過ぎた予定）", () => deleteEvent(pastEvent.id), () => "削除しました");
+    }
+    // 自分の予定でない（存在しない）eventId では、支出を記録できない（エラーになれば成功）
+    if (linkCategoryId !== undefined) {
+      try {
+        const wrong = await addExpense({ amount: 100, categoryId: linkCategoryId, eventId: 2147483647 });
+        await deleteExpense(wrong.id);
+        push({ ok: false, label: "addExpense の予定チェック", detail: "存在しない予定に結びつけて記録できてしまいました" });
+      } catch (e) {
+        push({ ok: true, label: "addExpense の予定チェック", detail: `正しくエラー：${(e as Error).message}` });
+      }
+    }
+
     try {
       await addEvent({
         title: "種類のテスト",
@@ -630,6 +726,96 @@ export default function DataCheck() {
           )}
           {advice.remainingToday !== null && <p>今日あと {advice.remainingToday} 回作り直せます</p>}
         </div>
+      )}
+
+      <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />
+
+      <h2 className="text-lg font-semibold">予想と実際（getMissedEvents・getEventActuals・getKindAverages）</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        「実際」は、予定に結びついた支出（expenses.event_id）の合計です。見本データには、今月の過ぎた予定
+        「ランチ会」（予想 1,500円・食費 2,300円 と結びつけ済み）と「カラオケ」（予想 2,500円・支出なし）が入ります。
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            ["missed", "記録し忘れた予定"],
+            ["actuals", "今月の予想と実際"],
+            ["averages", "種類ごとの実際の平均"],
+          ] as const
+        ).map(([kind, label]) => (
+          <button
+            key={kind}
+            type="button"
+            onClick={() => loadActuals(kind)}
+            disabled={actualsLoading}
+            className="rounded-full bg-foreground px-5 py-2 text-background disabled:opacity-50"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {actualsError && <p className="text-sm text-red-600">❌ {actualsError}</p>}
+
+      {missed && (
+        <section className="flex flex-col gap-1 text-sm">
+          <h3 className="font-semibold">記録し忘れた予定（今月・{missed.length}件）</h3>
+          {missed.length === 0 && <p>なし</p>}
+          <ul>
+            {missed.map((m) => (
+              <li key={m.eventId}>
+                {m.date}　{m.title}（{m.kind}・予想 {yen(m.estimated)}）
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {actuals && (
+        <section className="flex flex-col gap-1 text-sm">
+          <h3 className="font-semibold">予想と実際（{actuals.month}）</h3>
+          <p>
+            記録あり {actuals.summary.recordedCount}件：予想 {yen(actuals.summary.estimated)}・実際{" "}
+            {yen(actuals.summary.actual)}・差 {actuals.summary.diff >= 0 ? "+" : ""}
+            {yen(actuals.summary.diff)}　／　記録し忘れ {actuals.summary.missedCount}件　／　これから{" "}
+            {actuals.summary.upcomingCount}件
+          </p>
+          <table className="w-full text-left">
+            <thead>
+              <tr>
+                <th>日付</th><th>予定</th><th>予想</th><th>実際</th><th>差</th>
+              </tr>
+            </thead>
+            <tbody>
+              {actuals.events.map((a) => (
+                <tr key={a.eventId} className={a.ended ? "" : "text-zinc-400"}>
+                  <td>{a.date}</td>
+                  <td>
+                    {a.title}（{a.kind}）{a.ended ? "" : " まだ"}
+                  </td>
+                  <td>{yen(a.estimated)}</td>
+                  <td>{a.recorded ? `${yen(a.actual)}（${a.expenseCount}件）` : "−"}</td>
+                  <td className={a.diff !== null && a.diff > 0 ? "text-red-600" : ""}>
+                    {a.diff === null ? "−" : `${a.diff >= 0 ? "+" : ""}${yen(a.diff)}`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      {averages && (
+        <section className="flex flex-col gap-1 text-sm">
+          <h3 className="font-semibold">種類ごとの実際の平均（過去の予定すべて）</h3>
+          {averages.length === 0 && <p>なし（支出が結びついた、過ぎた予定がまだありません）</p>}
+          <ul>
+            {averages.map((a) => (
+              <li key={a.kind}>
+                {a.kind}：1回あたり {yen(a.average)}（{a.count}件・合計 {yen(a.total)}）
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <hr className="my-4 border-black/[.08] dark:border-white/[.145]" />

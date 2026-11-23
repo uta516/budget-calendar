@@ -35,7 +35,7 @@ Supabase のデータを読み書きする関数です。中身は `src/lib/supa
 | | `deleteCategory(id)` | なし（そのカテゴリの支出は「カテゴリなし」になる） |
 | | `ensureDefaultCategories()` | カテゴリの配列。0件なら 食費 25000、遊び・飲み会 12000、旅行 12000、交通費 3000、その他 10300 を作ってから返す |
 | 支出 | `getExpenses(month)` | その月の支出の配列（新しい日付順）。`month` は `"2026-11"` の形 |
-| | `addExpense({ amount, categoryId, eventId?, spentOn? })` | 追加した支出。`spentOn`（`"2026-11-14"` の形）を省略したら今日 |
+| | `addExpense({ amount, categoryId, eventId?, spentOn? })` | 追加した支出。`spentOn`（`"2026-11-14"` の形）を省略したら今日。`eventId` を渡すとその予定と結びつく（予想と実際の「実際」に入る）。先に自分の予定かを確かめ、見つからなければ「結びつける予定が見つかりませんでした」の Error |
 | | `deleteExpense(id)` | なし |
 | 目標 | `getGoal()` | 目標。まだ無ければ `null` |
 | | `saveGoal({ name, targetAmount, months, savedAmount })` | 保存した目標（1人1つ。無ければ作成、あれば更新） |
@@ -48,7 +48,7 @@ Supabase のデータを読み書きする関数です。中身は `src/lib/supa
 | | `syncGoogleCalendar(month)` | `{ added, updated, deleted }`。Googleカレンダーのその月の予定をアプリに同期する（手動の同期。「今すぐ同期」ボタンなど） |
 | | `autoSyncCalendar()` | `{ synced, reason?, added, updated, deleted, lastSyncedAt, error?, needsRelogin? }`。前の自動同期から30分以上たっていれば、今月と来月を同期する。**Error を投げない** |
 
-型も import できます：`Income`、`FixedCost`、`Category`、`Expense`、`Goal`、`Settings`、`Event`、`EventKind`、`SyncResult`、`AutoSyncResult`、`NewEventInput`、`AddEventResult`、`GoogleAddResult`。
+型も import できます：`Income`、`FixedCost`、`Category`、`Expense`、`Goal`、`Settings`、`Event`、`EventKind`、`SyncResult`、`AutoSyncResult`、`NewEventInput`、`AddEventResult`、`GoogleAddResult`、`MissedEvent`、`EventActual`、`ActualsSummary`、`EventActualsResult`、`KindAverage`。
 
 ### 予定について
 
@@ -225,6 +225,63 @@ try {
 } catch (e) {
   setError((e as Error).message); // 例：「金額は0以上の整数（円）で入力してください」
 }
+```
+
+## 予想と実際（記録し忘れた予定・予想と実際・種類ごとの平均）
+
+予定の「予想金額」と、実際に使った額を比べるための関数です（No.29・34・39 の土台）。中身は `src/lib/supabase/eventActuals.ts`、計算は `eventActualsCore.ts`（テスト付き）。
+
+```ts
+import { getMissedEvents, getEventActuals, getKindAverages, linkExpenseToEvent } from "@/lib/supabase";
+```
+
+**「実際」は、予定に結びついた支出（`expenses.event_id`）の合計です。** 支出を記録するときに `addExpense({ ..., eventId })` で予定を選んでおかないと、「実際」は空（記録なし）のままになります。支出の日付が予定と別の月でも、結びついていれば数えます。
+
+| 関数 | 戻り値 |
+|---|---|
+| `getMissedEvents(month?)` | 記録し忘れた予定の配列 `{ eventId, title, kind, date, startsAt, endsAt, estimated }`（開始日時の早い順）。`month` を省略したら今月 |
+| `getEventActuals(month?)` | `{ month, events, summary }`。`events` は予定ごとの `{ eventId, title, kind, date, startsAt, ended, estimated, actual, diff, expenseCount, recorded }`、`summary` はまとめ |
+| `getKindAverages()` | 種類ごとの `{ kind, average, count, total }`（1回あたりの実際の支出・件数・合計） |
+| `linkExpenseToEvent(expenseId, eventId)` | 記録済みの支出を予定に結びつける。`eventId` を `null` にすると結びつきを外す。戻り値は変更後の支出。`addExpense` と同じく、先に自分の予定かを確かめる |
+
+### 記録し忘れた予定（getMissedEvents）
+- その月の予定のうち、**もう終わっていて**（終了日時が今より前。終了日時が無い予定は開始日時で判定）、**結びついた支出が1件も無い**もの
+- **外すもの**：種類が `work`（バイトは出費ではないため）、**予想金額が0円の予定**（Google から同期した授業や会議などは other・0円で入るので、一覧がそれで埋まらないように）
+- 予想金額を入れ直せば（0円 → 1円以上）、一覧に出るようになる
+
+### 予想と実際（getEventActuals）
+- `work` の予定は外す。予想金額が0円の予定は入れる（0円の予定に支出を結びつけた場合も見られるように）
+- `actual`：結びついた支出の合計（記録が無ければ 0）。`expenseCount`：その件数。`recorded`：1件以上あるか
+- `diff`：**実際 − 予想**（プラスなら予想より多く使った）。記録が無い予定は `null`
+- `ended`：もう終わっているか（まだ終わっていない予定も一覧に入る）
+- `summary`：`{ recordedCount, missedCount, upcomingCount, estimated, actual, diff }`
+  - `estimated`・`actual`・`diff` は、**支出が記録されている予定だけ**の合計（記録が無い予定を混ぜると、差が意味を持たないため）
+  - `missedCount` は `getMissedEvents` と同じ数え方（予想0円は数えない）
+
+### 種類ごとの実際の平均（getKindAverages）
+- もう終わっていて、支出が記録されている予定だけを使う（月は区切らず、過去の予定すべて）。`work` は外す
+- `average` は1円単位で四捨五入。並びは種類の順（drink・meal・fun・trip・shop・other）
+- 例：飲み会3回で 3,000円・5,500円・4,001円 → `{ kind: "drink", average: 4167, count: 3, total: 12501 }`
+
+### 呼び出し例
+
+```tsx
+// 記録し忘れた予定を出し、押したら「記録する」画面へ（その予定の eventId を渡す）
+const missed = await getMissedEvents();
+missed.map((m) => <li key={m.eventId}>{m.date} {m.title}（予想 {m.estimated.toLocaleString()}円）</li>);
+
+// 新しく記録するとき：予定を選んで eventId を渡す
+await addExpense({ amount: 2800, categoryId, eventId: m.eventId });
+
+// もう記録してある支出を、あとから予定に結びつける（外すときは null）
+await linkExpenseToEvent(expense.id, m.eventId);
+
+// 予想と実際
+const { events, summary } = await getEventActuals();
+events.filter((a) => a.recorded).map((a) => `${a.title}：予想 ${a.estimated}円・実際 ${a.actual}円（${a.diff! >= 0 ? "+" : ""}${a.diff}円）`);
+
+// 種類ごとの平均（No.39：予想金額を自動で直すときに使う）
+const averages = await getKindAverages();
 ```
 
 ## まとめの関数（src/lib/summary.ts）

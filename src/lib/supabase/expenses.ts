@@ -1,6 +1,7 @@
 import type { Tables } from "@/types/database";
 import {
   assertFound,
+  assertOwnEvent,
   assertYen,
   fail,
   getSupabase,
@@ -65,6 +66,10 @@ export async function addExpense({
   const date = spentOn ?? todayString();
   if (!DATE_PATTERN.test(date)) {
     throw new Error("日付は \"2026-11-14\" の形で指定してください");
+  }
+  // 予定と結びつけるときは、先に自分の予定かを確かめる（linkExpenseToEvent と同じ）
+  if (eventId !== undefined && eventId !== null) {
+    await assertOwnEvent(eventId);
   }
   const userId = await getUserId();
   const { data, error } = await getSupabase()
