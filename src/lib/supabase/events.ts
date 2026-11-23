@@ -1,77 +1,45 @@
 import type { Tables } from "@/types/database";
-import {
-  assertFound,
-  assertYen,
-  fail,
-  getSupabase,
-  type DataClient,
-  getUserId,
-  requireName,
-} from "./helpers";
+import { fail, getSupabase, type DataClient } from "./helpers";
 import { isMonth, monthTimeRange } from "./month";
+import {
+  toEventRow,
+  type EventInput,
+  type GoogleAddResult,
+  type NewEventInput,
+} from "./eventInput";
+
+// 予定の入力の形とチェックは eventInput.ts にまとめた（サーバーからも使うため）。これまでどおりここからも import できる
+export { EVENT_KINDS } from "./eventInput";
+export type { EventKind, EventInput, NewEventInput, GoogleAddResult } from "./eventInput";
 
 export type Event = Tables<"events">;
 
-/** 予定の種類 */
-export const EVENT_KINDS = [
-  "drink",
-  "meal",
-  "fun",
-  "trip",
-  "shop",
-  "work",
-  "other",
-] as const;
-export type EventKind = (typeof EVENT_KINDS)[number];
-
-export type EventInput = {
-  title: string;
-  kind: EventKind;
-  /** 開始日時（ISO 形式。例："2026-11-20T19:00:00+09:00"） */
-  startsAt: string;
-  /** 終了日時（ISO 形式）。省略可 */
-  endsAt?: string | null;
-  /** 予想金額（円の整数） */
-  estimatedAmount: number;
-};
-
 export type SyncResult = { added: number; updated: number; deleted: number };
 
-function assertKind(kind: string): asserts kind is EventKind {
-  if (!(EVENT_KINDS as readonly string[]).includes(kind)) {
-    throw new Error(
-      `予定の種類は ${EVENT_KINDS.join(" / ")} のどれかで指定してください`,
-    );
-  }
-}
+/** addEvent の戻り値：保存した予定 ＋ Googleカレンダーに追加できたか */
+export type AddEventResult = Event & { google: GoogleAddResult };
 
-function toTimestamp(value: string, label: string): number {
-  const time = Date.parse(value);
-  if (Number.isNaN(time)) {
-    throw new Error(`${label}の日時の形が正しくありません`);
+/** 予定の API を呼び、失敗なら日本語のメッセージで Error を投げる */
+async function callEventsApi<T>(
+  path: string,
+  init: { method: "POST" | "PATCH" | "DELETE"; body?: unknown },
+  failMessage: string,
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: init.method,
+      headers: init.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+    });
+  } catch (e) {
+    fail(`${failMessage}（通信エラー）`, e);
   }
-  return time;
-}
-
-/** 入力をチェックして、DB の列の形にする */
-function toRow({ title, kind, startsAt, endsAt, estimatedAmount }: EventInput) {
-  const trimmed = requireName(title, "予定のタイトル");
-  assertKind(kind);
-  assertYen(estimatedAmount, "予想金額");
-  const start = toTimestamp(startsAt, "開始");
-  if (endsAt) {
-    const end = toTimestamp(endsAt, "終了");
-    if (end < start) {
-      throw new Error("終了日時は開始日時より後にしてください");
-    }
+  const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
+  if (!res.ok || !body) {
+    throw new Error(body?.error ?? failMessage);
   }
-  return {
-    title: trimmed,
-    kind,
-    starts_at: startsAt,
-    ends_at: endsAt ?? null,
-    estimated_amount: estimatedAmount,
-  };
+  return body;
 }
 
 /** その月（日本時間）に始まる予定の一覧（開始日時の早い順） */
@@ -88,40 +56,45 @@ export async function getEvents(month: string, client?: DataClient): Promise<Eve
   return data;
 }
 
-/** 予定を追加する（手入力の予定） */
-export async function addEvent(input: EventInput): Promise<Event> {
-  const row = toRow(input);
-  const userId = await getUserId();
-  const { data, error } = await getSupabase()
-    .from("events")
-    .insert({ ...row, user_id: userId })
-    .select()
-    .single();
-  if (error) fail("予定の追加に失敗しました", error);
-  return data;
+/**
+ * 予定を追加する。addToGoogle を省略したら true で、Googleカレンダーにも追加する（タイトルと日時だけ。金額と種類は送らない）。
+ * Google に追加できなかったときも Error は投げず、アプリにだけ保存して、戻り値の google.added が false になる。
+ * 入力が正しくないとき・アプリへの保存に失敗したとき（どこにも保存されていないとき）は、日本語のメッセージで Error を投げる。
+ */
+export async function addEvent(input: NewEventInput): Promise<AddEventResult> {
+  toEventRow(input); // 画面ですぐ分かるように、先にチェックする（サーバーでももう一度チェックする）
+  const { event, google } = await callEventsApi<{ event: Event; google: GoogleAddResult }>(
+    "/api/calendar/events",
+    { method: "POST", body: input },
+    "予定の追加に失敗しました",
+  );
+  return { ...event, google };
 }
 
-/** 予定を変更する */
+/**
+ * 予定を変更する。Google とつながっている予定（google_event_id がある）は、Googleカレンダーのタイトルと日時も変える。
+ * Google の変更に失敗したら、アプリも変えずに Error を投げる（Google とアプリでずれないように）。
+ */
 export async function updateEvent(id: number, input: EventInput): Promise<Event> {
-  const row = toRow(input);
-  const { data, error } = await getSupabase()
-    .from("events")
-    .update(row)
-    .eq("id", id)
-    .select();
-  if (error) fail("予定の変更に失敗しました", error);
-  return assertFound(data);
+  toEventRow(input);
+  return callEventsApi<Event>(
+    `/api/calendar/events/${id}`,
+    { method: "PATCH", body: input },
+    "予定の変更に失敗しました",
+  );
 }
 
-/** 予定を削除する（その予定に結びついた支出は残り、結びつきだけ外れる） */
+/**
+ * 予定を削除する（その予定に結びついた支出は残り、結びつきだけ外れる）。
+ * Google とつながっている予定は、本物の Googleカレンダーからも消える。
+ * Google の削除に失敗したら、アプリも消さずに Error を投げる。
+ */
 export async function deleteEvent(id: number): Promise<void> {
-  const { data, error } = await getSupabase()
-    .from("events")
-    .delete()
-    .eq("id", id)
-    .select("id");
-  if (error) fail("予定の削除に失敗しました", error);
-  assertFound(data);
+  await callEventsApi<{ deleted: true }>(
+    `/api/calendar/events/${id}`,
+    { method: "DELETE" },
+    "予定の削除に失敗しました",
+  );
 }
 
 /** Googleカレンダーのその月の予定を、アプリの予定に同期する */
