@@ -69,13 +69,13 @@ const GOAL = {
 /** 今週の支出（今日から何日前か） */
 const THIS_WEEK_EXPENSES = [
   { category: "食費", amount: 850, daysAgo: 0 },
-  { category: "交際費", amount: 2500, daysAgo: 1 },
+  { category: "遊び・飲み会", amount: 2500, daysAgo: 1 },
   { category: "食費", amount: 1200, daysAgo: 2 },
 ];
 
 /** 今週より前の今月の支出（今週の月曜から何日前か） */
 const EARLIER_EXPENSES = [
-  { category: "交際費", amount: 4800, daysBeforeWeek: 1 },
+  { category: "遊び・飲み会", amount: 4800, daysBeforeWeek: 1 },
   { category: "食費", amount: 3200, daysBeforeWeek: 3 },
   { category: "交通費", amount: 1500, daysBeforeWeek: 6 },
   { category: "その他", amount: 2650, daysBeforeWeek: 9 },

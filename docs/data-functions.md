@@ -33,7 +33,7 @@ Supabase のデータを読み書きする関数です。中身は `src/lib/supa
 | | `addCategory(name, monthlyBudget)` | 追加したカテゴリ |
 | | `updateCategory(id, name, monthlyBudget)` | 変更したカテゴリ |
 | | `deleteCategory(id)` | なし（そのカテゴリの支出は「カテゴリなし」になる） |
-| | `ensureDefaultCategories()` | カテゴリの配列。0件なら 食費25000・交際費12000・旅行12000・交通費3000・その他10300 を作ってから返す |
+| | `ensureDefaultCategories()` | カテゴリの配列。0件なら 食費 25000、遊び・飲み会 12000、旅行 12000、交通費 3000、その他 10300 を作ってから返す |
 | 支出 | `getExpenses(month)` | その月の支出の配列（新しい日付順）。`month` は `"2026-11"` の形 |
 | | `addExpense({ amount, categoryId, eventId?, spentOn? })` | 追加した支出。`spentOn`（`"2026-11-14"` の形）を省略したら今日 |
 | | `deleteExpense(id)` | なし |
@@ -291,7 +291,7 @@ useEffect(() => {
 
 | 種類 | カテゴリ |
 |---|---|
-| drink（飲み会）・fun（遊び） | 交際費 |
+| drink（飲み会）・fun（遊び） | 遊び・飲み会 |
 | meal（食事） | 食費 |
 | trip（旅行） | 旅行 |
 | shop（買い物）・other（その他） | その他 |
@@ -306,7 +306,7 @@ useEffect(() => {
 ```tsx
 const summary = await getBudgetSummary();
 
-// 表示例：交際費　使った 2,500円　予定 7,500円（サークル飲み会・映画）　残り 2,000円
+// 表示例：遊び・飲み会　使った 2,500円　予定 7,500円（サークル飲み会・映画）　残り 2,000円
 summary.categories.map((c) => (
   <p key={c.id}>
     {c.name}　使った {c.spent.toLocaleString()}円

@@ -10,7 +10,7 @@ export const dummyFixedCosts = [
 ];
 export const dummyCategories = [
   { id: 1, name: "食費", monthly_budget: 25000 },
-  { id: 2, name: "交際費", monthly_budget: 12000 },
+  { id: 2, name: "遊び・飲み会", monthly_budget: 12000 },
   { id: 3, name: "旅行", monthly_budget: 12000 },
   { id: 4, name: "交通費", monthly_budget: 3000 },
   { id: 5, name: "その他", monthly_budget: 10300 },
