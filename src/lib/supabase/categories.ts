@@ -13,7 +13,7 @@ export type Category = Tables<"categories">;
 /** カテゴリが0件のときに作る初期カテゴリ（月の予算・円） */
 export const DEFAULT_CATEGORIES = [
   { name: "食費", monthlyBudget: 25000 },
-  { name: "交際費", monthlyBudget: 12000 },
+  { name: "遊び・飲み会", monthlyBudget: 12000 },
   { name: "旅行", monthlyBudget: 12000 },
   { name: "交通費", monthlyBudget: 3000 },
   { name: "その他", monthlyBudget: 10300 },

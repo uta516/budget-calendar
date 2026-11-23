@@ -207,8 +207,8 @@ export function goalProgress(goal: Pick<Goal, "target_amount" | "saved_amount" |
  * 計算担当へ：予想の精度を上げるときに見直してほしい対応表
  */
 export const KIND_TO_CATEGORY: Record<EventKind, string | null> = {
-  drink: "交際費",
-  fun: "交際費",
+  drink: "遊び・飲み会",
+  fun: "遊び・飲み会",
   meal: "食費",
   trip: "旅行",
   shop: "その他",
