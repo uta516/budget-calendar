@@ -13,7 +13,7 @@ import {
   type EventKind,
 } from "@/lib/supabase";
 import { createClient } from "@/lib/supabase/client";
-import { toJstDate } from "@/lib/summary";
+import { budgetDays, toJstDate } from "@/lib/summary";
 
 export type SeedResult = {
   incomes: number;
@@ -25,6 +25,8 @@ export type SeedResult = {
   eventsSkipped: boolean;
   /** 今月のすでに過ぎた予定の件数（ランチ会・カラオケ。過ぎた日が無ければ0） */
   pastEvents: number;
+  /** 日ごとの目安の確認用の予定「カフェ」を入れた日（日曜と月末の早いほう） */
+  cafeDate: string;
 };
 
 // ───────── 日付（日本時間の "YYYY-MM-DD"） ─────────
@@ -109,6 +111,12 @@ const EVENTS: {
   { title: "映画", kind: "fun", amount: 3500, daysLater: 5, start: "14:00" },
   { title: "日帰り旅行", kind: "trip", amount: 11000, daysLater: 9, start: "09:00", end: "20:00" },
 ];
+
+/**
+ * 日ごとの目安の確認用の予定。目安を配る日（今日〜日曜と月末の早いほう）の最後の日に入れるので、
+ * いつ見本データを入れても、日別グラフに予定分が乗り、今日の目安が下がる
+ */
+const CAFE = { title: "カフェ", kind: "meal" as EventKind, amount: 1500, start: "15:00", end: "16:00" };
 
 // ───────── 消す ─────────
 
@@ -212,6 +220,17 @@ export async function seedDemoData(now: Date = new Date()): Promise<SeedResult> 
     }
   }
 
+  // 日ごとの目安の確認用：目安を配る日の最後の日（今日が日曜・月末なら今日）
+  const cafeDate = budgetDays(today).at(-1) ?? today;
+  await addEvent({
+    title: CAFE.title,
+    kind: CAFE.kind,
+    startsAt: `${cafeDate}T${CAFE.start}:00+09:00`,
+    endsAt: `${cafeDate}T${CAFE.end}:00+09:00`,
+    estimatedAmount: CAFE.amount,
+    addToGoogle: false, // 見本データは本物の Googleカレンダーに入れない
+  });
+
   return {
     incomes: INCOMES.length,
     fixedCosts: FIXED_COSTS.length,
@@ -220,5 +239,6 @@ export async function seedDemoData(now: Date = new Date()): Promise<SeedResult> 
     events: eventsSkipped ? 0 : EVENTS.length,
     eventsSkipped,
     pastEvents: pastEventIds.size,
+    cafeDate,
   };
 }

@@ -64,8 +64,8 @@ Supabase のデータを読み書きする関数です。中身は `src/lib/supa
   - Google から同期した予定も、タイトルと日時を変えられる（Google 側も同じように変わるので、次の同期で元に戻らない）
   - **削除の前に「Googleカレンダーからも消えます」と確認を出す**（`google_event_id` がある予定は、本物の Googleカレンダーから消えるため）
 - `syncGoogleCalendar` の決まり
-  - 新しく入る予定は `kind: "other"`、`estimated_amount: 0`
-  - すでにある予定は、タイトルと日時だけ更新する（ユーザーが直した種類と金額は消さない）
+  - 新しく入る予定は、タイトルから種類と予想金額を入れる（計算担当の `estimateEvent`。例：「サークル飲み会」→ drink・4,000円、「バイト」→ work・0円、当てはまらない「授業」など → other・0円）
+  - すでにある予定は、タイトルと日時だけ更新する（ユーザーが直した種類と金額は消さない）。Google でタイトルを変えても、種類と金額は入れ直さない
   - Googleで消された予定は、アプリでも消える
   - 「もう一度ログインしてください」の Error が出たら、ログアウトしてログインし直してもらう
 - 自動同期（`autoSyncCalendar`）の決まり
@@ -309,8 +309,11 @@ import { getHomeSummary, getBudgetSummary } from "@/lib/summary";
 | `monthLeft` | 今月あと使えるお金 |
 | `weekBudget` | 今週の予算 |
 | `weekSpent` | 今週使った額（今週のうち、今日と同じ月の日の分だけ） |
-| `weekLeft` | 今週あと使えるお金 |
-| `todayGuide` | 今日の目安 |
+| `weekLeft` | 今週あと使えるお金（予定で使う分も込み） |
+| `todayGuide` | 今日の目安（`days` の今日の `guide` と同じ。今日の予定分も込み）。決め方は下の「日ごとの目安の決め方」 |
+| `plannedTotal` | 今日〜（日曜と月末の早いほう）の予定で取り分けた額の合計 |
+| `normalLeft` | 普段使いに回せる残り（`weekLeft − plannedTotal`。マイナスなら0） |
+| `shortage` | 予定分が今週あとを超えた額（足りない額。超えなければ0）。1円以上なら「予定だけで今週の予算を超えています」などを出す |
 | `plannedUntilMonthEnd` | `{ amount, count }`：今日から月末までの予定の予想金額の合計と件数 |
 | `dailyMoney` | 普段使いに回せるお金（今月あと − 予定で使う見込み。マイナスもそのまま） |
 | `days` | 今週（月〜日）の7日分。下の表 |
@@ -323,9 +326,27 @@ import { getHomeSummary, getBudgetSummary } from "@/lib/summary";
 | `date` / `weekday` | `"2026-11-18"` / `"水"` |
 | `isToday` / `isPast` | 今日か、今日より前か |
 | `inMonth` | 今日と同じ月の日か（月をまたぐ週で、前後の月の日は false。灰色にするなどに使う） |
-| `guide` | その日の目安。過ぎた日は `null`。今は今日以降の日を均等に割った額（予定を考えた計算ができたら変わる） |
+| `guide` | その日の目安（`normal + planned`）。過ぎた日は `null`。**翌月の日は 0**（今日の月の数字だけで計算するため。日付だけ出す） |
+| `normal` | その日の普段使いの目安。過ぎた日と翌月の日は `null` |
+| `planned` | その日に予定分として取り分けた額。過ぎた日と翌月の日は `null`。work・予想0円・記録済みの予定は入らない |
 | `spent` | その日に使った額（今日と同じ月の日だけ。前の月の日は0） |
-| `plannedAmount` / `eventCount` | その日の予定の予想金額の合計と件数 |
+| `plannedAmount` / `eventCount` | その日の予定の予想金額の合計と件数（work・記録済みの予定も含む。目安の `planned` とは別） |
+
+#### 日ごとの目安の決め方
+計算は `src/lib/budget.ts` の `allocateDailyBudget(days, weekLeft, plans)`（計算担当）。summary.ts は、次の3つを用意して渡す。
+- `days`：今日〜（その週の日曜と、今日の月の月末の早いほう）。翌月の日は渡さない
+- `weekLeft`：今週あと（今までと同じ）
+- `plans`：`days` の日に始まる予定のうち、次を外したもの（`{ date, amount }`）
+  - 種類が `work`
+  - 予想金額が0円
+  - 記録済み（`expenses.event_id` で支出が1件でも結びついている。支出の日付が別の月でも記録済み）
+  - 今日すでに終わった予定は、記録されていなければ入れる（時刻は見ない）
+  - 何日もまたぐ予定は、始まる日の分として数える
+
+`allocateDailyBudget` は、予定分を取り分けた残り（`normalLeft`）を `days` で均等に割って `normal`（10円単位で切り捨て）にし、予定のある日はその予定分を足して `guide` にする。
+
+例：今週あと 6,000円、今日（水）〜日曜の5日、金曜に飲み会 2,000円
+→ `plannedTotal` 2,000円・`normalLeft` 4,000円・`normal` 800円 → 今日の目安 800円、金曜の目安 2,800円
 
 ```tsx
 const [home, setHome] = useState<HomeSummary | null>(null);
@@ -377,7 +398,7 @@ useEffect(() => {
 
 - カテゴリは名前で探す。名前を変えたなどで見つからなければ「その他」に入れ、「その他」も無ければ `uncategorizedPlanned` に入る
 - 対象は今日以降の予定だけ。過去の月を指定すると予定の額は0、来月以降を指定するとその月の予定すべて
-- Googleから同期した予定は、種類と金額を直すまで other・0円なので数えない
+- Googleから新しく同期した予定は、タイトルから種類と予想金額が入る（当てはまらないタイトルは other・0円なので数えない）。この決まりより前に同期した予定は other・0円のまま
 
 `perMonth` は（目標額 − たまった額）÷ 月数を1円単位で切り上げた額です。達成したら0になります。
 

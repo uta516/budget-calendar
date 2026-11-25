@@ -6,12 +6,13 @@
 // （計算担当に budget.ts へ移してテストを付けてもらう予定）。
 
 import {
+  allocateDailyBudget,
   categoryLeft,
   freeMoney,
   monthLeft,
-  todayGuide,
   weekBudget,
   weekLeft,
+  type DailyBudgetPlan,
 } from "./budget";
 // vitest には "@/" の設定が無いので、テストから読めるよう相対パスで import する
 import {
@@ -30,6 +31,8 @@ import {
   type Income,
   type DataClient,
 } from "./supabase";
+import { NON_SPENDING_KINDS } from "./supabase/eventActualsCore";
+import { getExpensesForEvents } from "./supabase/linkedExpenses";
 import { isMonth, nextMonth, toJstDate } from "./supabase/month";
 
 // ───────── 戻り値の型 ─────────
@@ -44,11 +47,21 @@ export type DayGuide = {
   isPast: boolean;
   /** 今日と同じ月の日か（月をまたぐ週で、前後の月の日は false） */
   inMonth: boolean;
-  /** その日の目安（円）。過ぎた日は null */
+  /**
+   * その日の目安（円）＝ 普段分（normal）＋ 予定分（planned）。
+   * 過ぎた日は null。翌月の日は 0（今日の月の数字だけで計算するため）
+   */
   guide: number | null;
+  /** その日の普段使いの目安（円）。過ぎた日と翌月の日は null */
+  normal: number | null;
+  /**
+   * その日に予定分として取り分けた額（円）。過ぎた日と翌月の日は null。
+   * work・予想0円・記録済み（支出が結びついている）の予定は入れない
+   */
+  planned: number | null;
   /** その日に使った額（円）。今日の月の日だけ数える */
   spent: number;
-  /** その日の予定の予想金額の合計（円） */
+  /** その日の予定の予想金額の合計（円）。work や記録済みの予定も含む（目安の planned とは別） */
   plannedAmount: number;
   /** その日の予定の件数 */
   eventCount: number;
@@ -78,10 +91,16 @@ export type HomeSummary = {
   weekBudget: number;
   /** 今週使った額（今週のうち、今日の月の日の分だけ） */
   weekSpent: number;
-  /** 今週あと使えるお金 */
+  /** 今週あと使えるお金（予定で使う分も込み） */
   weekLeft: number;
-  /** 今日の目安 */
+  /** 今日の目安（日ごとの目安の今日の分。今日の予定分も込み） */
   todayGuide: number;
+  /** 今日〜（日曜と月末の早いほう）の予定で取り分けた額の合計 */
+  plannedTotal: number;
+  /** 今週あと − plannedTotal（普段使いに回せる残り。マイナスなら0） */
+  normalLeft: number;
+  /** plannedTotal が今週あとを超えた額（足りない額。超えなければ0） */
+  shortage: number;
   /** 月末までに予定で使う見込み（今日以降の予定） */
   plannedUntilMonthEnd: { amount: number; count: number };
   /** 普段使いに回せるお金（今月あと − 予定で使う見込み。マイナスもそのまま） */
@@ -173,6 +192,50 @@ function mondayOf(date: string): string {
   return addDays(date, -((dayOfWeek(date) + 6) % 7));
 }
 
+/** その月の最後の日 */
+function monthEndOf(date: string): string {
+  const [y, m] = parts(date);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+/**
+ * 日ごとの目安を配る日：今日〜（その週の日曜と、今日の月の月末の早いほう）。
+ * 翌月の日は入れない（今日の月の数字だけで計算するため）
+ */
+export function budgetDays(today: string): string[] {
+  const sunday = addDays(mondayOf(today), 6);
+  const monthEnd = monthEndOf(today);
+  const last = sunday < monthEnd ? sunday : monthEnd;
+  const days: string[] = [];
+  for (let date = today; date <= last; date = addDays(date, 1)) days.push(date);
+  return days;
+}
+
+/**
+ * allocateDailyBudget に渡す予定（days の日に始まる予定）。次の予定は外す：
+ * - 種類が work
+ * - 予想金額が0円
+ * - 記録済み（recordedEventIds に入っている。支出が1件でも結びついている）
+ * 今日すでに終わった予定も、記録されていなければ入れる（時刻は見ない）。
+ * 何日もまたぐ予定は、始まる日の分として数える
+ */
+export function selectBudgetPlans(
+  events: readonly Pick<Event, "id" | "kind" | "starts_at" | "estimated_amount">[],
+  recordedEventIds: ReadonlySet<number>,
+  days: readonly string[],
+): DailyBudgetPlan[] {
+  const daySet = new Set(days);
+  return events
+    .filter(
+      (e) =>
+        !NON_SPENDING_KINDS.includes(e.kind) &&
+        e.estimated_amount > 0 &&
+        !recordedEventIds.has(e.id),
+    )
+    .map((e) => ({ date: toJstDate(e.starts_at), amount: e.estimated_amount }))
+    .filter((plan) => daySet.has(plan.date));
+}
+
 
 /**
  * budget.ts の関数に渡す Date。日本時間の暦（年・月・日・曜日）を、
@@ -234,6 +297,8 @@ export type HomeSummaryInput = {
   monthExpenses: Pick<Expense, "amount" | "spent_on">[];
   /** 今週の月曜の月・今日の月・来月の予定（重なりは除いてある） */
   events: Event[];
+  /** 記録済みの予定の id（支出が1件でも結びついている。支出の日付が別の月でも入る） */
+  recordedEventIds: ReadonlySet<number>;
 };
 
 /** 読み込んだデータからホーム画面の数字を作る。today は日本時間の "YYYY-MM-DD" */
@@ -252,7 +317,16 @@ export function buildHomeSummary(input: HomeSummaryInput, today: string): HomeSu
   );
   const weekly = weekBudget(free, todayDate);
   const weekLeftAmount = weekLeft(weekly, weekSpent);
-  const guide = todayGuide(weekLeftAmount, todayDate);
+
+  // 今日〜（日曜と月末の早いほう）に、予定分を取り分けてから残りを配る
+  const targetDays = budgetDays(today);
+  const allocation = allocateDailyBudget(
+    targetDays,
+    weekLeftAmount,
+    selectBudgetPlans(input.events, input.recordedEventIds, targetDays),
+  );
+  const dailyByDate = new Map(allocation.daily.map((d) => [d.date, d]));
+  const guide = dailyByDate.get(today)?.guide ?? 0;
 
   // 予定は日本時間の日付で扱う
   const events = input.events
@@ -268,14 +342,17 @@ export function buildHomeSummary(input: HomeSummaryInput, today: string): HomeSu
     const inMonth = date.startsWith(month);
     const isPast = date < today;
     const dayEvents = events.filter((e) => e.date === date);
+    // 今日以降の今日の月の日は allocation にある。過ぎた日は null、翌月の日は目安0
+    const allocated = dailyByDate.get(date);
     return {
       date,
       weekday: WEEKDAYS[dayOfWeek(date)],
       isToday: date === today,
       isPast,
       inMonth,
-      // 予定を考えた日ごとの計算（No.27・28）ができるまでは、今日の目安で均等に割る
-      guide: isPast ? null : guide,
+      guide: isPast ? null : (allocated?.guide ?? 0),
+      normal: allocated?.normal ?? null,
+      planned: allocated?.planned ?? null,
       spent: inMonth
         ? sumAmount(input.monthExpenses.filter((e) => e.spent_on === date))
         : 0,
@@ -293,6 +370,9 @@ export function buildHomeSummary(input: HomeSummaryInput, today: string): HomeSu
     weekSpent,
     weekLeft: weekLeftAmount,
     todayGuide: guide,
+    plannedTotal: allocation.plannedTotal,
+    normalLeft: allocation.normalLeft,
+    shortage: allocation.shortage,
     plannedUntilMonthEnd: { amount: plannedAmount, count: plannedThisMonth.length },
     dailyMoney: dailyMoneyOf(monthLeftAmount, plannedAmount),
     days,
@@ -419,8 +499,19 @@ export async function getHomeSummary(
     Promise.all(months.map((m) => getEvents(m, client))),
   ]);
 
+  // 目安に取り分ける日の予定だけ、記録済みか（支出が結びついているか）を調べる
+  const events = eventLists.flat();
+  const targetDays = new Set(budgetDays(todayStr));
+  const linked = await getExpensesForEvents(
+    events.filter((e) => targetDays.has(toJstDate(e.starts_at))).map((e) => e.id),
+    client,
+  );
+  const recordedEventIds = new Set(
+    linked.map((e) => e.event_id).filter((id): id is number => id !== null),
+  );
+
   return buildHomeSummary(
-    { incomes, fixedCosts, goal, monthExpenses, events: eventLists.flat() },
+    { incomes, fixedCosts, goal, monthExpenses, events, recordedEventIds },
     todayStr,
   );
 }

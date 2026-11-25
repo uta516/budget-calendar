@@ -14,6 +14,7 @@ import {
   toEventTimes,
   type EventTimes,
 } from "./google";
+import { newGoogleEventRow } from "./newEventRow";
 
 type Supabase = SupabaseClient<Database>;
 
@@ -187,13 +188,12 @@ async function syncMonth(
   if (toInsert.length > 0) {
     const { data, error } = await supabase
       .from("events")
+      // 新しい予定だけ、タイトルから種類と予想金額を入れる。
+      // ignoreDuplicates（ぶつかったら何もしない）なので、すでにある予定の種類・金額は変わらない
       .upsert(
-        toInsert.map((row) => ({
-          ...row,
-          user_id: userId,
-          kind: "other",
-          estimated_amount: 0,
-        })),
+        toInsert.map(({ google_event_id, ...times }) =>
+          newGoogleEventRow(google_event_id, times, userId),
+        ),
         { onConflict: "user_id,google_event_id", ignoreDuplicates: true },
       )
       .select("id")

@@ -61,6 +61,13 @@ const ADVICE_REASON: Record<string, string> = {
 
 const yen = (n: number) => `${n.toLocaleString()}円`;
 
+/** 比べる用：予定を考えずに、今週あとを目安を配る日で均等に割った額（表示だけに使う） */
+function evenGuide(home: HomeSummary): number {
+  const days = home.days.filter((d) => d.normal !== null).length;
+  if (days === 0) return 0;
+  return Math.max(0, Math.floor(home.weekLeft / days / 10) * 10);
+}
+
 const DEMO_WARNING =
   "自分のアカウントの収入・固定費・支出・手入力の予定・目標がすべて消えます（カテゴリ・設定・Googleから同期した予定は残ります）。";
 
@@ -119,7 +126,8 @@ export default function DataCheck() {
       setDemoMessage(
         `✅ 入れました：収入${r.incomes}件・固定費${r.fixedCosts}件・目標1件・支出${r.expenses}件（合計${yen(r.expenseTotal)}）・予定${r.events}件・過ぎた予定${r.pastEvents}件` +
           (r.eventsSkipped ? "（今日が月末なので、これからの予定は入れていません）" : "") +
-          (r.pastEvents === 0 ? "（今月の過ぎた日が無いので、過ぎた予定は入れていません）" : ""),
+          (r.pastEvents === 0 ? "（今月の過ぎた日が無いので、過ぎた予定は入れていません）" : "") +
+          `・目安の確認用の予定「カフェ」（${r.cafeDate.slice(5)}・${yen(1500)}）`,
       );
       setBudget(null);
       await loadSummary("home");
@@ -567,6 +575,15 @@ export default function DataCheck() {
             <li>今週の予算：{yen(home.weekBudget)}・今週使った額：{yen(home.weekSpent)}・今週あと：{yen(home.weekLeft)}</li>
             <li>今日の目安：{yen(home.todayGuide)}</li>
             <li>
+              予定分として取り分けた額（plannedTotal）：{yen(home.plannedTotal)}・普段使いに回せる残り（normalLeft）：
+              {yen(home.normalLeft)}・足りない額（shortage）：{yen(home.shortage)}
+            </li>
+            <li className="text-zinc-500">
+              比べる用：予定を考えない場合の今日の目安 ＝ 今週あと {yen(home.weekLeft)} ÷{" "}
+              {home.days.filter((d) => d.normal !== null).length}日 ＝{" "}
+              {yen(evenGuide(home))}
+            </li>
+            <li>
               月末までに予定で使う見込み：{yen(home.plannedUntilMonthEnd.amount)}（{home.plannedUntilMonthEnd.count}件）
             </li>
             <li>普段使いに回せるお金：{yen(home.dailyMoney)}</li>
@@ -574,7 +591,7 @@ export default function DataCheck() {
           <table className="w-full text-left">
             <thead>
               <tr>
-                <th>日付</th><th>目安</th><th>使った額</th><th>予定</th>
+                <th>日付</th><th>目安</th><th>普段分</th><th>予定分</th><th>使った額</th><th>予定（すべて）</th>
               </tr>
             </thead>
             <tbody>
@@ -582,6 +599,8 @@ export default function DataCheck() {
                 <tr key={d.date} className={d.isToday ? "font-semibold" : d.inMonth ? "" : "text-zinc-400"}>
                   <td>{d.date.slice(5)}({d.weekday}){d.isToday ? " 今日" : ""}</td>
                   <td>{d.guide === null ? "−" : yen(d.guide)}</td>
+                  <td>{d.normal === null ? "−" : yen(d.normal)}</td>
+                  <td>{d.planned === null ? "−" : yen(d.planned)}</td>
                   <td>{yen(d.spent)}</td>
                   <td>{d.eventCount}件・{yen(d.plannedAmount)}</td>
                 </tr>
