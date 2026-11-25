@@ -1,6 +1,7 @@
 "use client";
 
-import FullCalendar from "@fullcalendar/react";
+import { useEffect, useRef } from "react";
+import FullCalendar, { type CalendarRef } from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/react/daygrid";
 import interactionPlugin from "@fullcalendar/react/interaction";
 import classicThemePlugin from "@fullcalendar/react/themes/classic";
@@ -16,13 +17,27 @@ type Props = {
   events: Event[];
   /** 選んでいる日 "2026-11-28" */
   selectedDate: string;
+  /** 表示する月を合わせる日 "2026-12-05"（予定を追加して戻ったときなど）。null なら今までどおり */
+  focusDate?: string | null;
   onDateClick: (date: string) => void;
   /** 表示している月が変わったとき "2026-11" */
   onMonthChange: (month: string) => void;
 };
 
 // 月表示のカレンダー。予定は種類ごとの色の点で出す
-export default function MonthCalendar({ events, selectedDate, onDateClick, onMonthChange }: Props) {
+export default function MonthCalendar({
+  events,
+  selectedDate,
+  focusDate,
+  onDateClick,
+  onMonthChange,
+}: Props) {
+  const calendarRef = useRef<CalendarRef>(null);
+  // 画面が見えるたびに、その日の月を表示する（月が変わると datesSet から onMonthChange が呼ばれる）
+  useEffect(() => {
+    if (focusDate) calendarRef.current?.getApi().gotoDate(focusDate);
+  }, [focusDate]);
+
   const calendarEvents = [
     ...events.map((e) => ({
       id: String(e.id),
@@ -40,7 +55,9 @@ export default function MonthCalendar({ events, selectedDate, onDateClick, onMon
       <FullCalendar
         plugins={[dayGridPlugin, interactionPlugin, classicThemePlugin]}
         locale={jaLocale}
+        ref={calendarRef}
         initialView="dayGridMonth"
+        initialDate={focusDate ?? undefined}
         headerToolbar={{ left: "prev", center: "title", right: "next" }}
         height="auto"
         fixedWeekCount={false}

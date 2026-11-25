@@ -19,6 +19,16 @@ export function todayInJapan(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: JST });
 }
 
+/** URL の ?date の値が "2026-11-28" の形の実在する日付ならその文字を、違えば null を返す */
+export function dateParam(value: string | null): string | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d
+    ? value
+    : null;
+}
+
 /** "2026-11-28" → "11月28日（土）" */
 export function dayLabel(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
