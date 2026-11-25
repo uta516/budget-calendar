@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { addEvent, type EventKind } from "@/lib/supabase";
 import { KIND_STYLES } from "@/components/calendar/eventKinds";
 import EventFormHeader from "@/components/event/EventFormHeader";
@@ -11,20 +11,26 @@ import DateTimeFields from "@/components/event/DateTimeFields";
 import AmountField from "@/components/event/AmountField";
 import { estimateAmount } from "@/components/event/estimateAmount";
 import { checkEventForm, toJstIso } from "@/components/event/validateEvent";
+import { dateParam } from "@/components/calendar/dates";
 
 /** 日本時間の今日 "2026-11-20" */
 function todayInJapan(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 }
 
+const DEFAULT_START = "19:00";
+const DEFAULT_END = "21:00";
+
 export default function NewEventPage() {
   const router = useRouter();
+  // カレンダーの「＋ この日に予定を追加」から来たときは、その日付を最初から入れる
+  const dateFromUrl = dateParam(useSearchParams().get("date"));
 
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<EventKind>("other");
-  const [date, setDate] = useState(todayInJapan);
-  const [startTime, setStartTime] = useState("19:00");
-  const [endTime, setEndTime] = useState("21:00");
+  const [date, setDate] = useState(() => dateFromUrl ?? todayInJapan());
+  const [startTime, setStartTime] = useState(DEFAULT_START);
+  const [endTime, setEndTime] = useState(DEFAULT_END);
   const [amountText, setAmountText] = useState("");
   /** 金額が種類から自動で入ったままなら、その種類 */
   const [autoKind, setAutoKind] = useState<EventKind | null>(null);
@@ -32,6 +38,25 @@ export default function NewEventPage() {
   const [warning, setWarning] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // この画面は、ほかの画面に移っても隠れて残る（Cache Components の決まり）。
+  // 2回目以降に開いたときも ?date の日付を入れるため、画面が見えるたびに読み直す
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- URL（外のもの）に合わせるため
+    if (dateFromUrl) setDate(dateFromUrl);
+  }, [dateFromUrl]);
+
+  /** 保存したあとに、入力を最初の状態に戻す（次に開いたとき、前の入力や「保存中…」が残らないように） */
+  function resetForm() {
+    setTitle("");
+    setKind("other");
+    setStartTime(DEFAULT_START);
+    setEndTime(DEFAULT_END);
+    setAmountText("");
+    setAutoKind(null);
+    setWarning(null);
+    setSaving(false);
+  }
 
   function selectKind(next: EventKind) {
     setKind(next);
@@ -57,7 +82,8 @@ export default function NewEventPage() {
         endsAt: endTime ? toJstIso(date, endTime) : null,
         estimatedAmount: Number(amountText.trim()),
       });
-      router.push("/calendar");
+      resetForm();
+      router.push(`/calendar?date=${date}`); // 戻ったときに、その日を選んだ状態にする
     } catch (e) {
       setSaveError((e as Error).message);
       setSaving(false);

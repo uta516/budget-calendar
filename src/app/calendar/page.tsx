@@ -1,17 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { autoSyncCalendar, getEvents, type AutoSyncResult, type Event } from "@/lib/supabase";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import KindLegend from "@/components/calendar/KindLegend";
 import DayEventList from "@/components/calendar/DayEventList";
 import SyncStatus from "@/components/calendar/SyncStatus";
-import { jstDate, todayInJapan } from "@/components/calendar/dates";
+import { dateParam, jstDate, todayInJapan } from "@/components/calendar/dates";
 
 export default function CalendarPage() {
-  const [today] = useState(todayInJapan);
-  const [month, setMonth] = useState(() => today.slice(0, 7));
-  const [selectedDate, setSelectedDate] = useState(today);
+  // 予定の追加画面から戻ったとき（?date=）は、その日を選んだ状態で開く
+  const dateFromUrl = dateParam(useSearchParams().get("date"));
+  const [month, setMonth] = useState(() => (dateFromUrl ?? todayInJapan()).slice(0, 7));
+  const [selectedDate, setSelectedDate] = useState(() => dateFromUrl ?? todayInJapan());
+
+  // この画面は、ほかの画面に移っても隠れて残る（Cache Components の決まり）。
+  // 予定を追加して戻ったときも ?date の日を選ぶため、画面が見えるたびに読み直す
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- URL（外のもの）に合わせるため
+    if (dateFromUrl) setSelectedDate(dateFromUrl);
+  }, [dateFromUrl]);
   const [sync, setSync] = useState<AutoSyncResult | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +69,7 @@ export default function CalendarPage() {
         <MonthCalendar
           events={events}
           selectedDate={selectedDate}
+          focusDate={dateFromUrl}
           onDateClick={setSelectedDate}
           onMonthChange={setMonth}
         />

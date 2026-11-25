@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Event } from "@/lib/supabase";
 import { kindStyle } from "./eventKinds";
 import { dayLabel, isAllDay, jstTime } from "./dates";
@@ -64,6 +65,13 @@ export default function DayEventList({ date, events }: Props) {
           })}
         </ul>
       )}
+
+      <Link
+        href={`/events/new?date=${date}`}
+        className="mt-3 block rounded-2xl border border-dashed border-teal-300 py-3 text-center text-sm font-bold text-teal-700 hover:bg-teal-50"
+      >
+        ＋ この日に予定を追加
+      </Link>
     </section>
   );
 }
