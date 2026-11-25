@@ -1,5 +1,6 @@
 import type { PlannedEvent } from "@/lib/summary";
-import { percent, yen } from "./format";
+import BudgetBar from "./BudgetBar";
+import { yen } from "./format";
 
 type Props = {
   name: string;
@@ -12,16 +13,12 @@ type Props = {
   left: number | null;
 };
 
-// カテゴリ1つ分（名前・残り・バー・内訳）
+// カテゴリ1つ分（名前・残り・バー・バーの色ごとの金額）
 export default function CategoryRow({ name, budget, spent, planned, plannedEvents, left }: Props) {
   const over = left !== null && left < 0;
-  // 予算を超えたときは、使った額＋予定の額を100%としてバーを描く
-  const whole = Math.max(budget ?? 0, spent + planned);
-  const spentWidth = percent(spent, whole);
-  const plannedWidth = percent(planned, whole);
 
   return (
-    <li className="py-3">
+    <li className="py-3 text-zinc-800">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className={`font-bold ${over ? "text-red-600" : ""}`}>{name}</h3>
         {left !== null && (
@@ -39,24 +36,35 @@ export default function CategoryRow({ name, budget, spent, planned, plannedEvent
         )}
       </div>
 
-      <div
-        className={`mt-1.5 flex h-2 overflow-hidden rounded-full ${over ? "bg-red-100" : "bg-zinc-200"}`}
-        role="img"
-        aria-label={`使った ${yen(spent)}円、予定 ${yen(planned)}円${budget !== null ? `、予算 ${yen(budget)}円` : ""}`}
-      >
-        <div className={over ? "bg-red-600" : "bg-teal-700"} style={{ width: `${spentWidth}%` }} />
-        <div className={over ? "bg-red-300" : "bg-orange-500"} style={{ width: `${plannedWidth}%` }} />
-      </div>
+      <BudgetBar budget={budget} spent={spent} planned={planned} />
 
-      <p className="mt-1.5 text-xs leading-relaxed text-zinc-500">
-        使った {yen(spent)}円
+      {/* バーの色と同じ印をつけて、どの色がいくらかを並べる */}
+      <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-600">
+        <Legend swatch={over ? "bg-red-600" : "bg-teal-700"} label="使った" amount={spent} />
         {planned > 0 && (
-          <>
-            　予定 {yen(planned)}円（{plannedEvents.map((e) => e.title).join("・")}）
-          </>
+          <Legend swatch={over ? "bg-red-300" : "bg-teal-300"} label="予定" amount={planned} />
         )}
-        {budget !== null && <>　予算 {yen(budget)}円</>}
-      </p>
+        {left !== null && !over && (
+          <Legend swatch="bg-zinc-100 ring-1 ring-inset ring-zinc-300" label="残り" amount={left} />
+        )}
+        {budget !== null && (
+          <li className="ml-auto text-zinc-400">予算 {yen(budget)}円</li>
+        )}
+      </ul>
+      {plannedEvents.length > 0 && (
+        <p className="mt-1 truncate text-xs text-zinc-400">
+          予定：{plannedEvents.map((e) => e.title).join("・")}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function Legend({ swatch, label, amount }: { swatch: string; label: string; amount: number }) {
+  return (
+    <li className="flex items-center gap-1">
+      <span className={`h-2.5 w-2.5 rounded-sm ${swatch}`} aria-hidden />
+      {label} <span className="font-bold text-zinc-800">{yen(amount)}円</span>
     </li>
   );
 }
