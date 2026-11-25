@@ -9,7 +9,8 @@ import TitleField from "@/components/event/TitleField";
 import KindPicker from "@/components/event/KindPicker";
 import DateTimeFields from "@/components/event/DateTimeFields";
 import AmountField from "@/components/event/AmountField";
-import { estimateAmount } from "@/components/event/estimateAmount";
+import { estimateEventAmount } from "@/lib/budget";
+import GoogleAddNotice, { type SavedNotice } from "@/components/event/GoogleAddNotice";
 import { checkEventForm, toJstIso } from "@/components/event/validateEvent";
 import { dateParam } from "@/components/calendar/dates";
 
@@ -38,6 +39,11 @@ export default function NewEventPage() {
   const [warning, setWarning] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** 予定は保存できたが、Googleカレンダーには追加できなかったときの知らせ */
+  const [notice, setNotice] = useState<SavedNotice | null>(null);
+
+  // この画面は隠れて残るので、ほかの画面に移ったら知らせを消す（次に開いたとき前の知らせが残らないように）
+  useEffect(() => () => setNotice(null), []);
 
   // この画面は、ほかの画面に移っても隠れて残る（Cache Components の決まり）。
   // 2回目以降に開いたときも ?date の日付を入れるため、画面が見えるたびに読み直す
@@ -60,7 +66,8 @@ export default function NewEventPage() {
 
   function selectKind(next: EventKind) {
     setKind(next);
-    setAmountText(String(estimateAmount(next)));
+    // 種類ごとの目安金額は計算担当の関数（src/lib/budget.ts、PR #42）
+    setAmountText(String(estimateEventAmount(next)));
     setAutoKind(next);
     setWarning(null);
   }
@@ -74,8 +81,9 @@ export default function NewEventPage() {
     }
     setSaving(true);
     setSaveError(null);
+    setNotice(null);
     try {
-      await addEvent({
+      const saved = await addEvent({
         title: title.trim(),
         kind,
         startsAt: toJstIso(date, startTime),
@@ -83,6 +91,17 @@ export default function NewEventPage() {
         estimatedAmount: Number(amountText.trim()),
       });
       resetForm();
+      // Googleカレンダーに追加できなかったとき（予定はアプリに保存できている）は、
+      // すぐにカレンダーへ戻らず、この画面で知らせる
+      if (!saved.google.added && saved.google.reason !== "not-requested") {
+        setNotice({
+          title: saved.title,
+          date,
+          message: saved.google.message ?? "Googleカレンダーには追加できませんでした",
+          needsRelogin: saved.google.reason === "needs-relogin",
+        });
+        return;
+      }
       router.push(`/calendar?date=${date}`); // 戻ったときに、その日を選んだ状態にする
     } catch (e) {
       setSaveError((e as Error).message);
@@ -94,6 +113,8 @@ export default function NewEventPage() {
     <div className="flex flex-1 flex-col bg-zinc-100">
       <main className="mx-auto w-full max-w-md flex-1 space-y-4 px-4 pb-8 pt-5">
         <EventFormHeader />
+
+        {notice && <GoogleAddNotice notice={notice} />}
 
         <TitleField
           value={title}
