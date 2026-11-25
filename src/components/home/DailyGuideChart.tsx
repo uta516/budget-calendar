@@ -1,8 +1,12 @@
+import type { Event } from "@/lib/supabase";
 import type { DayGuide } from "@/lib/summary";
-import { yen } from "./yen";
+import WeekEventList from "./WeekEventList";
+import { shortDate, yen } from "./yen";
 
 type Props = {
   days: DayGuide[];
+  /** 今週の予定（予定名を出すため）。読み込み中・読めなかったときは null */
+  events: Event[] | null;
 };
 
 /** 棒に出す額：過ぎた日は使った額、今日以降は目安 */
@@ -25,12 +29,12 @@ function labelColor(day: DayGuide): string {
 }
 
 // 今週の日ごとの目安（棒グラフ）
-export default function DailyGuideChart({ days }: Props) {
+export default function DailyGuideChart({ days, events }: Props) {
   const max = Math.max(...days.filter((d) => d.inMonth).map(amountOf), 1);
   const hasEvent = days.some((d) => !d.isPast && d.inMonth && d.eventCount > 0);
 
   return (
-    <section className="rounded-3xl bg-white p-5 shadow-sm">
+    <section className="rounded-3xl bg-white p-5 text-zinc-800 shadow-sm">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="font-bold">今週の日ごとの目安</h2>
         {hasEvent && <p className="text-xs text-zinc-500">オレンジは予定がある日</p>}
@@ -55,12 +59,19 @@ export default function DailyGuideChart({ days }: Props) {
                   style={{ height: `${height}px` }}
                 />
               </div>
-              <span className={`mt-1.5 text-xs ${labelColor(day)}`}>{day.weekday}</span>
+              <span className={`mt-1.5 text-[10px] leading-tight ${labelColor(day)}`}>
+                {shortDate(day.date)}
+              </span>
+              <span className={`text-xs leading-tight ${labelColor(day)}`}>（{day.weekday}）</span>
+              {day.eventCount > 0 && (
+                <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-orange-500" aria-label={`予定${day.eventCount}件`} />
+              )}
             </li>
           );
         })}
       </ul>
       <p className="mt-3 text-xs text-zinc-500">過ぎた日は使った額、今日からは目安を表示</p>
+      <WeekEventList days={days} events={events} />
     </section>
   );
 }

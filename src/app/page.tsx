@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getHomeSummary, type HomeSummary } from "@/lib/summary";
-import { autoSyncCalendar } from "@/lib/supabase";
+import { autoSyncCalendar, getEvents, type Event } from "@/lib/supabase";
+import { jstDate } from "@/components/calendar/dates";
 import { getAdvice, type AdviceResult } from "@/lib/ai/advice";
 import AdviceCard from "@/components/home/AdviceCard";
 import LogoutButton from "@/components/LogoutButton";
@@ -12,11 +13,28 @@ import MonthOutlook from "@/components/home/MonthOutlook";
 import DailyGuideChart from "@/components/home/DailyGuideChart";
 import RecordButton from "@/components/home/RecordButton";
 
+/**
+ * 今週（summary.days の月曜〜日曜）に始まる予定を読む。
+ * 月をまたぐ週は2つの月を読む。読めなかったら null（予定名が出ないだけで、目安は出る）
+ */
+async function loadWeekEvents(summary: HomeSummary): Promise<Event[] | null> {
+  const dates = new Set(summary.days.map((d) => d.date));
+  const months = [...new Set(summary.days.map((d) => d.date.slice(0, 7)))];
+  try {
+    const lists = await Promise.all(months.map((m) => getEvents(m)));
+    return lists.flat().filter((e) => dates.has(jstDate(e.starts_at)));
+  } catch {
+    return null;
+  }
+}
+
 export default function Home() {
   const [home, setHome] = useState<HomeSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [advice, setAdvice] = useState<AdviceResult | null>(null);
+  /** 今週の予定（日ごとの目安に予定名を出すため） */
+  const [weekEvents, setWeekEvents] = useState<Event[] | null>(null);
   /** 画面が閉じたあとに届いた答えを使わないための目印 */
   const visible = useRef(false);
 
@@ -25,6 +43,9 @@ export default function Home() {
       .then((summary) => {
         setHome(summary);
         setError(null);
+        loadWeekEvents(summary).then((events) => {
+          if (visible.current) setWeekEvents(events);
+        });
       })
       .catch((e: Error) => setError(e.message));
   }, []);
@@ -92,7 +113,7 @@ export default function Home() {
               plannedCount={home.plannedUntilMonthEnd.count}
               dailyMoney={home.dailyMoney}
             />
-            <DailyGuideChart days={home.days} />
+            <DailyGuideChart days={home.days} events={weekEvents} />
 
             {/* 設定画面ができるまで、ログアウトはここに置いておく */}
             <div className="flex justify-center pt-2">
