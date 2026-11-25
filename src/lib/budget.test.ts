@@ -6,6 +6,9 @@ import {
   weekLeft,
   todayGuide,
   categoryLeft,
+  estimateEventAmount,
+  classifyEventTitle,
+  estimateEvent,
 } from "./budget";
 
 describe("freeMoney", () => {
@@ -113,5 +116,86 @@ describe("categoryLeft", () => {
     [1001, 2, 999],
   ])("カテゴリ予算%d円・使用額%d円なら残額は%d円", (budget, spent, expected) => {
     expect(categoryLeft(budget, spent)).toBe(expected);
+  });
+});
+
+describe("estimateEventAmount", () => {
+  it.each([
+    ["drink", 4000],
+    ["meal", 1500],
+    ["fun", 3000],
+    ["trip", 20000],
+    ["shop", 3000],
+    ["work", 0],
+    ["other", 0],
+  ] as const)("%sの仮の目安金額は%d円", (kind, expected) => {
+    expect(estimateEventAmount(kind)).toBe(expected);
+  });
+});
+
+describe("classifyEventTitle", () => {
+  it.each([
+    ["バイト", "work"],
+    ["アルバイト", "work"],
+    ["シフト", "work"],
+    ["飲み会", "drink"],
+    ["飲み", "drink"],
+    ["打ち上げ", "drink"],
+    ["旅行", "trip"],
+    ["日帰り旅行", "trip"],
+    ["ランチ", "meal"],
+    ["ディナー", "meal"],
+    ["外食", "meal"],
+    ["映画", "fun"],
+    ["カラオケ", "fun"],
+    ["遊び", "fun"],
+    ["デート", "fun"],
+    ["買い物", "shop"],
+    ["ショッピング", "shop"],
+  ] as const)("キーワード「%s」を%sと判定する", (title, expected) => {
+    expect(classifyEventTitle(title)).toBe(expected);
+  });
+
+  it.each([
+    ["サークル飲み会", "drink"],
+    ["ゼミの打ち上げ", "drink"],
+    ["友達とランチ", "meal"],
+    ["家族で日帰り旅行に行く", "trip"],
+    ["今月のアルバイトのシフト", "work"],
+    ["映画とカラオケ", "fun"],
+    ["ランチのあとディナーも外食", "meal"],
+    ["買い物とショッピング", "shop"],
+    ["飲み会と打ち上げ", "drink"],
+    ["  友達とランチ  ", "meal"],
+    ["\t映画\n", "fun"],
+    ["", "other"],
+    ["  \t\n　", "other"],
+    ["授業", "other"],
+    ["ゼミの会議", "other"],
+    ["バイト後に飲み会", "other"],
+    ["旅行先で買い物", "other"],
+    ["ランチと映画", "other"],
+    ["飲み会のあとバイト", "other"],
+    ["バイトと飲み会と映画", "other"],
+  ] as const)("タイトル「%s」を%sと判定する", (title, expected) => {
+    expect(classifyEventTitle(title)).toBe(expected);
+  });
+});
+
+describe("estimateEvent", () => {
+  it.each([
+    ["サークル飲み会", "drink", 4000],
+    ["友達とランチ", "meal", 1500],
+    ["映画とカラオケ", "fun", 3000],
+    ["日帰り旅行", "trip", 20000],
+    ["買い物", "shop", 3000],
+    ["アルバイト", "work", 0],
+    ["授業", "other", 0],
+    ["", "other", 0],
+    [" 　\t", "other", 0],
+    ["バイト後に飲み会", "other", 0],
+    ["旅行先で買い物", "other", 0],
+  ] as const)("「%s」から%s・%d円を返す", (title, kind, estimatedAmount) => {
+    expect(estimateEvent(title)).toEqual({ kind, estimatedAmount });
   });
 });
