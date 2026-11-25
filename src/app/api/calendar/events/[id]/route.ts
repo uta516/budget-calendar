@@ -3,6 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import { oneHourLater, toEventRow, type EventInput } from "@/lib/supabase/eventInput";
 import { deleteEvent as deleteGoogleEvent, patchEvent } from "../../_lib/google";
 import { getAccessToken, RELOGIN_MESSAGE, toCalendarSyncError } from "../../_lib/sync";
+import { calendarWriteTimeoutMs, GoogleTimeoutError, withTimeout } from "../../_lib/timeout";
+
+// Google の返事が無かった（時間切れ）ときのメッセージ。Google だけ変わっていることがあるので、そのことも知らせる
+const UPDATE_TIMEOUT_MESSAGE =
+  "Googleカレンダーの返事が無かったので、変更しませんでした。少し待ってからもう一度試してください（Googleカレンダーだけ変わっていることがあります。そのときは次の同期でタイトルと日時がそろいますが、種類と予想金額はもう一度直してください）";
+const DELETE_TIMEOUT_MESSAGE =
+  "Googleカレンダーの返事が無かったので、削除しませんでした。少し待ってからもう一度試してください（Googleカレンダーからは消えていることがあります。そのときは次の同期でアプリからも消えます）";
 
 function errorResponse(status: number, message: string) {
   return NextResponse.json({ error: message, needsRelogin: status === 401 }, { status });
@@ -47,6 +54,8 @@ async function loadEvent(ctx: RouteContext<"/api/calendar/events/[id]">) {
  *   Google が失敗したら、DB は変えずにエラーを返す（Google とアプリでずれないように）
  * - Google ですでに消えていた（404 / 410）ときは、アプリだけ変えて「手入力の予定」にする
  *   （そのままだと、次の同期で「Googleで消された予定」として消えてしまうため）
+ * - Google の呼び出し（トークンの準備を含む）は8秒で打ち切る（CALENDAR_WRITE_TIMEOUT_MS で変えられる）。
+ *   時間切れなら DB は変えずに 504 を返す
  * 戻り値：変更後の予定
  */
 export async function PATCH(request: NextRequest, ctx: RouteContext<"/api/calendar/events/[id]">) {
@@ -67,14 +76,15 @@ export async function PATCH(request: NextRequest, ctx: RouteContext<"/api/calend
 
   let unlinkGoogle = false;
   if (event.google_event_id) {
+    const googleId = event.google_event_id;
+    const timeoutMs = calendarWriteTimeoutMs();
     try {
-      const accessToken = await getAccessToken(supabase, user.id);
       const endsAt = row.ends_at ?? oneHourLater(row.starts_at);
-      const found = await patchEvent(accessToken, event.google_event_id, {
-        title: row.title,
-        startsAt: row.starts_at,
-        endsAt,
-      });
+      const write = { title: row.title, startsAt: row.starts_at, endsAt };
+      const found = await withTimeout(async (signal) => {
+        const accessToken = await getAccessToken(supabase, user.id, signal);
+        return patchEvent(accessToken, googleId, write, signal);
+      }, timeoutMs);
       if (found) {
         row = { ...row, ends_at: endsAt }; // 次の同期で「更新」にならないように、Google と同じ終了日時にする
       } else {
@@ -82,6 +92,12 @@ export async function PATCH(request: NextRequest, ctx: RouteContext<"/api/calend
         console.warn("[calendar-write] Google ではすでに消えていたので、手入力の予定にします:", event.id);
       }
     } catch (e) {
+      if (e instanceof GoogleTimeoutError) {
+        console.error(
+          `[calendar-write] Google の呼び出しが制限時間（${timeoutMs}ms）を超えたので打ち切りました。アプリは変えていません（変更、予定 id ${event.id}）`,
+        );
+        return errorResponse(504, UPDATE_TIMEOUT_MESSAGE);
+      }
       const err = toCalendarSyncError(e, "Googleカレンダーの予定を変更できませんでした");
       return errorResponse(err.status, err.message);
     }
@@ -106,6 +122,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext<"/api/calend
  * - Google とつながっている予定は、先に Googleカレンダーからも消す（本物の Googleカレンダーから消える）
  *   Google が失敗したら、DB は変えずにエラーを返す
  * - Google ですでに消えていた（404 / 410）ときは、エラーにせずアプリだけ消す
+ * - Google の呼び出しは8秒で打ち切る。時間切れなら DB は変えずに 504 を返す
  * 戻り値：{ deleted: true, google: "deleted" | "already-gone" | "not-linked" }
  */
 export async function DELETE(_request: NextRequest, ctx: RouteContext<"/api/calendar/events/[id]">) {
@@ -115,11 +132,21 @@ export async function DELETE(_request: NextRequest, ctx: RouteContext<"/api/cale
 
   let google: "deleted" | "already-gone" | "not-linked" = "not-linked";
   if (event.google_event_id) {
+    const googleId = event.google_event_id;
+    const timeoutMs = calendarWriteTimeoutMs();
     try {
-      const accessToken = await getAccessToken(supabase, user.id);
-      const found = await deleteGoogleEvent(accessToken, event.google_event_id);
+      const found = await withTimeout(async (signal) => {
+        const accessToken = await getAccessToken(supabase, user.id, signal);
+        return deleteGoogleEvent(accessToken, googleId, signal);
+      }, timeoutMs);
       google = found ? "deleted" : "already-gone";
     } catch (e) {
+      if (e instanceof GoogleTimeoutError) {
+        console.error(
+          `[calendar-write] Google の呼び出しが制限時間（${timeoutMs}ms）を超えたので打ち切りました。アプリは変えていません（削除、予定 id ${event.id}）`,
+        );
+        return errorResponse(504, DELETE_TIMEOUT_MESSAGE);
+      }
       const err = toCalendarSyncError(e, "Googleカレンダーの予定を削除できませんでした");
       return errorResponse(err.status, err.message);
     }
