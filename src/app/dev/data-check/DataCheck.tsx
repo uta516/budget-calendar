@@ -266,6 +266,28 @@ export default function DataCheck() {
     setGwRunning(false);
   }
 
+  /** 残したテスト予定を変更する（CALENDAR_WRITE_TIMEOUT_MS を小さくして、変更の時間切れを試すため） */
+  async function updateKeptGoogleEvent() {
+    if (gwKeptId === null) return;
+    setGwRunning(true);
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString("sv-SE", {
+      timeZone: "Asia/Tokyo",
+    });
+    await gwStep(
+      "updateEvent（残したテスト予定）",
+      () =>
+        updateEvent(gwKeptId, {
+          title: "アプリからのテスト予定（もう一度変更）",
+          kind: "meal",
+          startsAt: `${tomorrow}T15:00:00+09:00`,
+          endsAt: `${tomorrow}T16:00:00+09:00`,
+          estimatedAmount: 2500,
+        }),
+      (e) => `タイトル「${e.title}」、${formatDateTime(e.starts_at)}〜`,
+    );
+    setGwRunning(false);
+  }
+
   async function deleteKeptGoogleEvent() {
     if (gwKeptId === null) return;
     if (!window.confirm("残したテスト予定を削除します。Googleカレンダーからも消えます。よろしいですか？")) return;
@@ -858,6 +880,16 @@ export default function DataCheck() {
         >
           {gwRunning ? "実行中…" : "Googleにも追加して作る → 変更 → 削除"}
         </button>
+        {gwKeptId !== null && (
+          <button
+            type="button"
+            onClick={updateKeptGoogleEvent}
+            disabled={gwRunning}
+            className="rounded-full border border-black/[.08] px-5 py-2 disabled:opacity-50 dark:border-white/[.145]"
+          >
+            残したテスト予定を変更
+          </button>
+        )}
         {gwKeptId !== null && (
           <button
             type="button"
