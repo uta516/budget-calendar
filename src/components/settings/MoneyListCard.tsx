@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import FormMessage, { type Message } from "./FormMessage";
+import MoneyInputs from "./MoneyInputs";
 import MoneyItemRow, { type MoneyItem } from "./MoneyItemRow";
 import { parseName, parseYen, yen } from "./parse";
-import { cardClass, inputClass, primaryButtonClass } from "./styles";
+import { cardClass, primaryButtonClass, subButtonClass } from "./styles";
 
 type Props = {
   /** 「収入」「固定費」 */
@@ -32,6 +33,15 @@ export default function MoneyListCard({
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<Message>(null);
+  /** 「＋追加」を押して入力欄を出しているか */
+  const [adding, setAdding] = useState(false);
+
+  /** 追加の入力欄を閉じて、中身を空にする */
+  function closeAdd() {
+    setAdding(false);
+    setName("");
+    setAmount("");
+  }
 
   const total = items.reduce((sum, item) => sum + item.amount, 0);
 
@@ -57,8 +67,7 @@ export default function MoneyListCard({
     if (!a.ok) return setMessage({ type: "warning", text: a.warning });
     try {
       await run(() => onAdd(n.value, a.value), "保存しました");
-      setName("");
-      setAmount("");
+      closeAdd();
     } catch {
       // メッセージは run で出している
     }
@@ -82,6 +91,7 @@ export default function MoneyListCard({
               key={item.id}
               item={item}
               label={label}
+              namePlaceholder={namePlaceholder}
               busy={busy}
               onMessage={setMessage}
               onUpdate={(id, n, a) => run(() => onUpdate(id, n, a), "保存しました")}
@@ -91,30 +101,36 @@ export default function MoneyListCard({
         </ul>
       )}
 
-      <div className="flex gap-2 border-t border-zinc-100 pt-3">
-        <input
-          type="text"
-          value={name}
-          maxLength={30}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={namePlaceholder}
-          aria-label={`追加する${label}の名前`}
-          className={inputClass}
-        />
-        <input
-          type="text"
-          inputMode="numeric"
-          value={amount}
-          maxLength={9}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="円"
-          aria-label={`追加する${label}の金額`}
-          className={`${inputClass} w-24 shrink-0 text-right`}
-        />
-        <button type="button" onClick={add} disabled={busy} className={`${primaryButtonClass} shrink-0`}>
-          追加
+      {adding ? (
+        <div className="border-t border-zinc-100 pt-3">
+          <MoneyInputs
+            label={`追加する${label}`}
+            name={name}
+            amount={amount}
+            namePlaceholder={namePlaceholder}
+            onNameChange={setName}
+            onAmountChange={setAmount}
+          >
+            <button type="button" onClick={closeAdd} disabled={busy} className={`${subButtonClass} shrink-0`}>
+              やめる
+            </button>
+            <button type="button" onClick={add} disabled={busy} className={`${primaryButtonClass} shrink-0`}>
+              追加
+            </button>
+          </MoneyInputs>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setAdding(true);
+            setMessage(null);
+          }}
+          className="w-full rounded-xl border border-dashed border-teal-700/40 py-2.5 text-sm font-bold text-teal-700 hover:bg-teal-50"
+        >
+          ＋ {label}を追加
         </button>
-      </div>
+      )}
 
       <FormMessage message={message} />
     </section>

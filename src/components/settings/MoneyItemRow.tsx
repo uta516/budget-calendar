@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { parseName, parseYen, yen } from "./parse";
-import { inputClass, primaryButtonClass, subButtonClass } from "./styles";
+import MoneyInputs from "./MoneyInputs";
+import { primaryButtonClass, subButtonClass } from "./styles";
 import type { Message } from "./FormMessage";
 
 export type MoneyItem = { id: number; name: string; amount: number };
@@ -11,6 +12,8 @@ type Props = {
   item: MoneyItem;
   /** 「収入」「固定費」 */
   label: string;
+  /** 名前の欄の薄い文字（例：「例：仕送り」） */
+  namePlaceholder: string;
   busy: boolean;
   onUpdate: (id: number, name: string, amount: number) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
@@ -18,7 +21,7 @@ type Props = {
 };
 
 // 一覧の1行。「変更」で入力欄になる
-export default function MoneyItemRow({ item, label, busy, onUpdate, onDelete, onMessage }: Props) {
+export default function MoneyItemRow({ item, label, namePlaceholder, busy, onUpdate, onDelete, onMessage }: Props) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(item.name);
   const [amount, setAmount] = useState(String(item.amount));
@@ -50,34 +53,22 @@ export default function MoneyItemRow({ item, label, busy, onUpdate, onDelete, on
 
   if (editing) {
     return (
-      <li className="space-y-2 rounded-2xl bg-zinc-50 p-3">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={name}
-            maxLength={30}
-            onChange={(e) => setName(e.target.value)}
-            aria-label={`${label}の名前`}
-            className={inputClass}
-          />
-          <input
-            type="text"
-            inputMode="numeric"
-            value={amount}
-            maxLength={9}
-            onChange={(e) => setAmount(e.target.value)}
-            aria-label={`${label}の金額`}
-            className={`${inputClass} w-28 shrink-0 text-right`}
-          />
-        </div>
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={() => setEditing(false)} disabled={busy} className={subButtonClass}>
+      <li className="rounded-2xl bg-zinc-50 p-3">
+        <MoneyInputs
+          label={label}
+          name={name}
+          amount={amount}
+          namePlaceholder={namePlaceholder}
+          onNameChange={setName}
+          onAmountChange={setAmount}
+        >
+          <button type="button" onClick={() => setEditing(false)} disabled={busy} className={`${subButtonClass} shrink-0`}>
             やめる
           </button>
-          <button type="button" onClick={save} disabled={busy} className={primaryButtonClass}>
+          <button type="button" onClick={save} disabled={busy} className={`${primaryButtonClass} shrink-0`}>
             保存
           </button>
-        </div>
+        </MoneyInputs>
       </li>
     );
   }
