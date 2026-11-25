@@ -13,7 +13,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - データの型は src/types/database.ts を使う（手で書き換えない）
 - 担当外のファイルは変更しない
   - 画面：src/app の各ページ、src/components
-  - データ・連携：src/lib/supabase（src/lib/supabase の中のテストを含む）、src/lib/summary.ts、src/lib/ai（prompts.ts を除く。Gemini を呼ぶ仕組み）、src/app/api/ai、src/app/api/calendar、src/app/login、src/app/auth、src/app/dev、src/proxy.ts、supabase/、docs/data-functions.md
+  - データ・連携：src/lib/supabase（src/lib/supabase の中のテストを含む）、src/lib/summary.ts、src/lib/summary.test.ts、src/lib/ai（prompts.ts を除く。Gemini を呼ぶ仕組み）、src/app/api/ai、src/app/api/calendar、src/app/login、src/app/auth、src/app/dev、src/proxy.ts、supabase/、docs/data-functions.md
   - 計算：src/lib/budget.ts、テスト、src/lib/ai/prompts.ts（AI に何を聞くか）
 - 計算処理は src/lib/budget.ts に書き、必ずテストを付ける
 - APIキーなどの秘密はコードに書かず、環境変数を使う
@@ -27,7 +27,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 他の1人以上が確認してから main に入れる
 
 ## 計算の関数（src/lib/budget.ts）
-中間発表までは、予定のことは考えない単純な版にする。
+ホームの今日の目安・日ごとの目安は、予定分を取り分ける allocateDailyBudget で出す（todayGuide はホームでは使っていない）。
 
 | 関数 | 意味 | 決まり |
 |---|---|---|
@@ -35,8 +35,13 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | monthLeft(自由に使えるお金, 今月使った額) | 今月あと使えるお金 | 引き算。マイナスもそのまま返す |
 | weekBudget(自由に使えるお金, 今日の日付) | 今週の予算 | 自由に使えるお金 ÷ その月の日数 × 7。10円単位で切り捨て |
 | weekLeft(今週の予算, 今週使った額) | 今週あと使えるお金 | 引き算。マイナスもそのまま返す |
-| todayGuide(今週あと, 今日の日付) | 今日の目安 | 今週あと ÷ 日曜までの残り日数（今日を含む）。10円単位で切り捨て。マイナスなら0 |
+| todayGuide(今週あと, 今日の日付) | 今日の目安（予定を考えない版。ホームでは使っていない） | 今週あと ÷ 日曜までの残り日数（今日を含む）。10円単位で切り捨て。マイナスなら0 |
 | categoryLeft(カテゴリの予算, そのカテゴリで使った額) | カテゴリ別の残り | 引き算。マイナスもそのまま返す |
+| allocateDailyBudget(対象日, 今週あと, 予定) | 日ごとの目安（予定分込み） | 予定分を取り分けた残り（マイナスなら0）を対象日で均等に割り、10円単位で切り捨てて普段分にする。予定のある日は予定分を足す。足りない額も返す |
+| estimateEvent(タイトル) | 予定の種類と予想金額 | タイトルの言葉で種類を決め、種類ごとの仮の金額を返す。複数の種類に当てはまるか、どれにも当てはまらなければ other・0円 |
+
+- ホーム（summary.ts）が allocateDailyBudget に渡すもの：対象日は今日〜（日曜と月末の早いほう）。予定は対象日に始まるもののうち、work・予想0円・記録済み（event_id で支出が結びついている）を外したもの。何日もまたぐ予定は始まる日の分。翌月の日の目安は0
+- Google 同期は、新しく保存する予定にだけ estimateEvent で種類と予想金額を入れる。すでにある予定の種類・金額は変えない
 
 - 週は月曜はじまり
 - 月をまたぐ週は、今日がある月の数字で計算する
@@ -52,7 +57,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 設定：getSettings()（無ければ初期値）、saveSettings({ hourlyWage, nightRate, holidayBonus })
 - 予定：getEvents("2026-11")、addEvent({ title, kind, startsAt, endsAt?, estimatedAmount, addToGoogle? })（addToGoogle の省略時は true で Googleカレンダーにも追加。Google に追加できなくても Error は投げず、戻り値の google.added で分かる）、updateEvent(id, { title, kind, startsAt, endsAt?, estimatedAmount })・deleteEvent(id)（Google とつながっている予定は Google も変更・削除する。Google が失敗したらアプリも変えずに Error）、syncGoogleCalendar("2026-11")（Googleカレンダーのその月の予定を同期し、{ added, updated, deleted } を返す）、autoSyncCalendar()（ホーム・カレンダーを開いたときに呼ぶ。前の自動同期から30分以上たっていれば今月と来月を同期する。Error は投げず、結果を戻り値で返す）
 - 予想と実際：getMissedEvents(month?)（記録し忘れた予定。終わっていて結びついた支出が無いもの。work と予想0円は外す）、getEventActuals(month?)（予定ごとの予想・実際・差とまとめ）、getKindAverages()（種類ごとの実際の平均）、linkExpenseToEvent(expenseId, eventId | null)（記録済みの支出を予定に結びつける・外す）。「実際」は expenses.event_id で結びついた支出の合計なので、支出を記録するときは addExpense に eventId を渡す
-- まとめ（src/lib/summary.ts）：getHomeSummary(today?)（ホーム画面の数字）、getBudgetSummary(month?)（予算画面の数字）。`import { ... } from "@/lib/summary"`
+- まとめ（src/lib/summary.ts）：getHomeSummary(today?)（ホーム画面の数字。予定分込みの日ごとの目安と plannedTotal・normalLeft・shortage も返す）、getBudgetSummary(month?)（予算画面の数字）。`import { ... } from "@/lib/summary"`
 - AI（src/lib/ai/advice.ts）：getAdvice()（先読みアドバイス1〜2文。Error は投げず、AIで作ったか決まった文かも返す）。`import { getAdvice } from "@/lib/ai/advice"`。src/lib/ai/gemini.ts はサーバー専用なので画面から import しない
 - 失敗したときは日本語のメッセージの Error を投げる
 - これらができるまで、画面は src/lib/dummy.ts の仮データを使う
