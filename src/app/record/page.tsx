@@ -1,8 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { addExpense, ensureDefaultCategories, type Category } from "@/lib/supabase";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  addExpense,
+  ensureDefaultCategories,
+  getEvents,
+  getMissedEvents,
+  type Category,
+} from "@/lib/supabase";
+import EventPicker from "@/components/record/EventPicker";
+import MissedBanner from "@/components/record/MissedBanner";
+import { pickableEvents, prevMonth, type PickableEvent } from "@/components/record/pickableEvents";
 import { getBudgetSummary, getHomeSummary, type BudgetSummary, type HomeSummary } from "@/lib/summary";
 import RecordHeader from "@/components/record/RecordHeader";
 import AmountDisplay, { type LeftPreview } from "@/components/record/AmountDisplay";
@@ -14,9 +23,24 @@ import { todayInJapan } from "@/components/record/format";
 /** 金額の桁数の上限（999万9999円まで） */
 const MAX_DIGITS = 7;
 
+/** URL の ?event の値が正の整数ならその数、違えば null */
+function eventParam(value: string | null): number | null {
+  if (!value || !/^\d+$/.test(value)) return null;
+  const id = Number(value);
+  return id > 0 ? id : null;
+}
+
 export default function RecordPage() {
   const router = useRouter();
   const [today] = useState(todayInJapan);
+  // 「記録し忘れた予定」から来たとき（?event=12&from=missed）は、その予定を選んだ状態で開く
+  const params = useSearchParams();
+  const eventFromUrl = eventParam(params.get("event"));
+  const fromMissed = params.get("from") === "missed";
+
+  const [events, setEvents] = useState<PickableEvent[] | null>(null);
+  const [missedCount, setMissedCount] = useState(0);
+  const [eventId, setEventId] = useState<number | null>(null);
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -43,6 +67,51 @@ export default function RecordPage() {
     getBudgetSummary().then(setBudget).catch(() => {});
     getHomeSummary().then(setHome).catch(() => {});
   }, []);
+
+  // 選べる予定（最近の予定と、記録し忘れた予定）。今月と先月の分を読む。
+  // この画面はほかの画面に移っても隠れて残るので、見えるたびに読み直す（記録し忘れの数を新しくするため）
+  useEffect(() => {
+    let ignore = false;
+    const month = today.slice(0, 7);
+    const last = prevMonth(month);
+    Promise.all([getEvents(month), getEvents(last), getMissedEvents(month), getMissedEvents(last)])
+      .then(([thisEvents, lastEvents, thisMissed, lastMissed]) => {
+        if (ignore) return;
+        const missed = [...thisMissed, ...lastMissed];
+        setEvents(pickableEvents([...thisEvents, ...lastEvents], missed, today));
+        setMissedCount(missed.length);
+      })
+      // 予定が読めなくても支出は記録できるので、選ぶ欄を空にするだけ
+      .catch(() => !ignore && setEvents([]));
+    return () => {
+      ignore = true;
+    };
+  }, [today]);
+
+  // ?event の予定を選び、日付をその予定の日にする
+  useEffect(() => {
+    if (!events || eventFromUrl === null) return;
+    const event = events.find((e) => e.id === eventFromUrl);
+    if (!event) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- URL（外のもの）に合わせるため
+    setEventId(event.id);
+    setDate(event.date);
+  }, [events, eventFromUrl]);
+
+  function selectEvent(event: PickableEvent | null) {
+    setEventId(event?.id ?? null);
+    if (event) setDate(event.date);
+  }
+
+  /** 記録したあとに入力を最初に戻す（この画面は隠れて残るので、次に開いたとき前の入力が残らないように） */
+  function resetForm() {
+    setDigits("");
+    setEventId(null);
+    setDate(today);
+    setMemo("");
+    setWarning(null);
+    setSaving(false);
+  }
 
   const amount = Number(digits || "0");
 
@@ -81,8 +150,10 @@ export default function RecordPage() {
     setSaving(true);
     setSaveError(null);
     try {
-      await addExpense({ amount, categoryId, spentOn: date });
-      router.push("/");
+      // 予定を選んでいれば eventId を渡す（予想と実際の「実際」になる）
+      await addExpense({ amount, categoryId, spentOn: date, eventId: eventId ?? undefined });
+      resetForm();
+      router.push(fromMissed ? "/record/missed" : "/");
     } catch (e) {
       setSaveError((e as Error).message);
       setSaving(false);
@@ -94,6 +165,7 @@ export default function RecordPage() {
       <main className="mx-auto w-full max-w-md flex-1 space-y-4 px-4 pb-8 pt-5">
         <RecordHeader date={date} />
 
+        <MissedBanner count={missedCount} />
         <AmountDisplay amount={amount} previews={previews} />
 
         {loadError ? (
@@ -112,6 +184,8 @@ export default function RecordPage() {
             }}
           />
         )}
+
+        <EventPicker events={events} selectedId={eventId} onSelect={selectEvent} />
 
         <DateMemoFields
           date={date}
