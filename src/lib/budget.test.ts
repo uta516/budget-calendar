@@ -6,6 +6,7 @@ import {
   weekLeft,
   todayGuide,
   categoryLeft,
+  allocateDailyBudget,
 } from "./budget";
 
 describe("freeMoney", () => {
@@ -113,5 +114,129 @@ describe("categoryLeft", () => {
     [1001, 2, 999],
   ])("カテゴリ予算%d円・使用額%d円なら残額は%d円", (budget, spent, expected) => {
     expect(categoryLeft(budget, spent)).toBe(expected);
+  });
+});
+
+describe("allocateDailyBudget", () => {
+  const days = ["2026-11-25", "2026-11-26", "2026-11-27"];
+
+  it("予定分を先に取り分け、予定がある日の目安に加える", () => {
+    expect(allocateDailyBudget(days, 9000, [{ date: days[2], amount: 3000 }])).toEqual({
+      daily: [
+        { date: days[0], normal: 2000, planned: 0, guide: 2000 },
+        { date: days[1], normal: 2000, planned: 0, guide: 2000 },
+        { date: days[2], normal: 2000, planned: 3000, guide: 5000 },
+      ],
+      plannedTotal: 3000,
+      normalLeft: 6000,
+      shortage: 0,
+    });
+  });
+
+  it("予定がなければ全額を均等配分する", () => {
+    expect(allocateDailyBudget(days, 9000, [])).toEqual({
+      daily: days.map((date) => ({ date, normal: 3000, planned: 0, guide: 3000 })),
+      plannedTotal: 0, normalLeft: 9000, shortage: 0,
+    });
+  });
+
+  it("同じ日の複数予定を合算する", () => {
+    const result = allocateDailyBudget(days, 9000, [
+      { date: days[1], amount: 1000 }, { date: days[1], amount: 2000 },
+    ]);
+    expect(result.plannedTotal).toBe(3000);
+    expect(result.daily[1]).toEqual({ date: days[1], normal: 2000, planned: 3000, guide: 5000 });
+  });
+
+  it("複数日の予定をそれぞれの日に加える", () => {
+    expect(allocateDailyBudget(days, 9000, [
+      { date: days[2], amount: 2000 }, { date: days[0], amount: 1000 },
+    ])).toEqual({
+      daily: [
+        { date: days[0], normal: 2000, planned: 1000, guide: 3000 },
+        { date: days[1], normal: 2000, planned: 0, guide: 2000 },
+        { date: days[2], normal: 2000, planned: 2000, guide: 4000 },
+      ],
+      plannedTotal: 3000, normalLeft: 6000, shortage: 0,
+    });
+  });
+
+  it("0円の予定でも普段使い分を減らさない", () => {
+    expect(allocateDailyBudget([days[0]], 1000, [{ date: days[0], amount: 0 }])).toEqual({
+      daily: [{ date: days[0], normal: 1000, planned: 0, guide: 1000 }],
+      plannedTotal: 0, normalLeft: 1000, shortage: 0,
+    });
+  });
+
+  it.each([
+    ["予定合計と残額が等しい", 3000, 3000, 0],
+    ["予定合計が残額を超える", 1000, 3000, 2000],
+    ["残額0円で予定がある", 0, 3000, 3000],
+    ["残額も予定も0円", 0, 0, 0],
+    ["残額マイナスで予定がある", -1000, 3000, 4000],
+    ["残額マイナスで予定がない", -1000, 0, 1000],
+  ])("%s", (_label, remaining, amount, shortage) => {
+    const plans = amount === 0 ? [] : [{ date: days[0], amount }];
+    expect(allocateDailyBudget([days[0]], remaining, plans)).toEqual({
+      daily: [{ date: days[0], normal: 0, planned: amount, guide: amount }],
+      plannedTotal: amount, normalLeft: 0, shortage,
+    });
+  });
+
+  it("月末の対象日1日へ全額を配分する", () => {
+    expect(allocateDailyBudget(["2026-11-30"], 9000, [
+      { date: "2026-11-30", amount: 3000 },
+    ])).toEqual({
+      daily: [{ date: "2026-11-30", normal: 6000, planned: 3000, guide: 9000 }],
+      plannedTotal: 3000, normalLeft: 6000, shortage: 0,
+    });
+  });
+
+  it("最後に10円単位で切り捨て、残額自体は丸めず余りも配らない", () => {
+    const result = allocateDailyBudget(days, 1001, []);
+    expect(result).toEqual({
+      daily: days.map((date) => ({ date, normal: 330, planned: 0, guide: 330 })),
+      plannedTotal: 0, normalLeft: 1001, shortage: 0,
+    });
+    expect(result.daily.reduce((total, day) => total + day.guide, 0)).toBe(990);
+  });
+
+  it("1日分が10円未満なら普段使い分は0円", () => {
+    expect(allocateDailyBudget(days, 29, []).daily).toEqual(
+      days.map((date) => ({ date, normal: 0, planned: 0, guide: 0 })),
+    );
+  });
+
+  it("予定金額と合計の目安は丸めない", () => {
+    expect(allocateDailyBudget([days[0]], 2006, [{ date: days[0], amount: 1001 }])).toEqual({
+      daily: [{ date: days[0], normal: 1000, planned: 1001, guide: 2001 }],
+      plannedTotal: 1001, normalLeft: 1005, shortage: 0,
+    });
+  });
+
+  it("対象日が空でも残額を返し、日割りは行わない", () => {
+    expect(allocateDailyBudget([], 1001, [])).toEqual({
+      daily: [], plannedTotal: 0, normalLeft: 1001, shortage: 0,
+    });
+  });
+
+  it("対象日が空でも渡された予定の合計と不足額を計算する", () => {
+    expect(allocateDailyBudget([], -100, [{ date: days[0], amount: 1001 }])).toEqual({
+      daily: [], plannedTotal: 1001, normalLeft: 0, shortage: 1101,
+    });
+  });
+
+  it("入力の配列・予定オブジェクトを変更せず、日付順を維持する", () => {
+    const frozenDays = Object.freeze([...days]);
+    const plans = Object.freeze([
+      Object.freeze({ date: days[2], amount: 2000 }),
+      Object.freeze({ date: days[0], amount: 1000 }),
+    ]);
+    const result = allocateDailyBudget(frozenDays, 9000, plans);
+    expect(frozenDays).toEqual(["2026-11-25", "2026-11-26", "2026-11-27"]);
+    expect(plans).toEqual([
+      { date: "2026-11-27", amount: 2000 }, { date: "2026-11-25", amount: 1000 },
+    ]);
+    expect(result.daily.map((day) => day.date)).toEqual([...frozenDays]);
   });
 });
