@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getHomeSummary, type HomeSummary } from "@/lib/summary";
 import { autoSyncCalendar } from "@/lib/supabase";
+import { getAdvice, type AdviceResult } from "@/lib/ai/advice";
+import AdviceCard from "@/components/home/AdviceCard";
 import LogoutButton from "@/components/LogoutButton";
 import HomeHeader from "@/components/home/HomeHeader";
 import WeekMoneyCard from "@/components/home/WeekMoneyCard";
@@ -14,6 +16,9 @@ export default function Home() {
   const [home, setHome] = useState<HomeSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [advice, setAdvice] = useState<AdviceResult | null>(null);
+  /** 画面が閉じたあとに届いた答えを使わないための目印 */
+  const visible = useRef(false);
 
   const load = useCallback(() => {
     getHomeSummary()
@@ -25,6 +30,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    visible.current = true;
     load();
     // ホームを開いたらカレンダーを自動同期し、予定が変わったら数字を読み直す
     autoSyncCalendar().then((result) => {
@@ -37,7 +43,15 @@ export default function Home() {
       } else if (result.added + result.updated + result.deleted > 0) {
         load();
       }
+      // 先読みアドバイスは、同期で予定が変わったあとのデータで作ってもらうため、同期のあとに1回だけ呼ぶ
+      // （AI の作り直しは1日10回までなので、同期の前後で2回呼ばない）。Error は投げない
+      getAdvice().then((r) => {
+        if (visible.current) setAdvice(r);
+      });
     });
+    return () => {
+      visible.current = false;
+    };
   }, [load]);
 
   const todayGuide = home?.days.find((d) => d.isToday);
@@ -71,6 +85,7 @@ export default function Home() {
               weekStart={home.days[0].date}
               weekEnd={home.days[home.days.length - 1].date}
             />
+            <AdviceCard result={advice} />
             <MonthOutlook
               monthLeft={home.monthLeft}
               plannedAmount={home.plannedUntilMonthEnd.amount}
