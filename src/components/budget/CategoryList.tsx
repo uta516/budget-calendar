@@ -19,8 +19,12 @@ export default function CategoryList({ summary }: Props) {
             使った
           </span>
           <span className="flex items-center gap-1">
-            <span className="h-2 w-2 rounded-sm bg-orange-500" aria-hidden />
+            <span className="h-2 w-2 rounded-sm bg-teal-300" aria-hidden />
             予定
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-2 rounded-sm bg-zinc-100 ring-1 ring-inset ring-zinc-300" aria-hidden />
+            残り
           </span>
         </p>
       </div>
